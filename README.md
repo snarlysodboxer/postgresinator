@@ -1,4 +1,4 @@
-postgresinator
-==============
+deployinator
+============
 
-Opinionatedly Deploy and Manage PostgreSQL clusters
+Opinionatedly Deploy Applications
