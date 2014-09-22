@@ -2,7 +2,7 @@ namespace :config do
   desc 'Write example config files'
   task :write_examples do
     run_locally do
-      execute "mkdir -p ./templates"
+      execute! "mkdir -p ./templates"
 
       # example postgresinator.rb
       config = File.read(File.dirname(__FILE__) + '/examples/postgresinator_example.rb')
