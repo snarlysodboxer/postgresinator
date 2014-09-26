@@ -77,10 +77,12 @@ local   all         postgres                          ident
 <% if @server.master %>
 <% @cluster.servers.each do |s| %>
 <% unless s.master %>
-hostssl replication     replicator      <%= Resolv.getaddress(s.domain) %>/32            md5
+hostssl replication replicator  <%= s.ip %>/32            md5
 <% end %>
 <% end %>
 <% end %>
+
+host    all         all         0.0.0.0/0             md5
 
 # "local" is for Unix domain socket connections only
 local   all         all                               ident

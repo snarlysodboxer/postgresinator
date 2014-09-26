@@ -12,7 +12,8 @@ Gem::Specification.new do |s|
     "lib/postgresinator/config.rb",
     "lib/postgresinator/examples/postgresinator_example.rb",
     "lib/postgresinator/examples/postgresql_example.conf.erb",
-    "lib/postgresinator/examples/pg_hba_example.conf.erb"
+    "lib/postgresinator/examples/pg_hba_example.conf.erb",
+    "lib/postgresinator/examples/recovery_example.conf.erb"
   ]
   s.add_runtime_dependency 'rake',        '= 10.3.2'
   s.add_runtime_dependency 'sshkit',      '= 1.5.1'

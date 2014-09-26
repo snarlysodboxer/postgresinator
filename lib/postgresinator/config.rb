@@ -2,7 +2,7 @@ namespace :config do
   desc 'Write example config files'
   task :write_examples do
     run_locally do
-      execute! "mkdir -p ./templates"
+      execute "mkdir -p ./templates"
 
       # example postgresinator.rb
       config = File.read(File.dirname(__FILE__) + '/examples/postgresinator_example.rb')
@@ -21,6 +21,12 @@ namespace :config do
       File.open('./templates/pg_hba_example.conf.erb', 'w') { |f| f.write(config) }
       info "Wrote './templates/pg_hba_example.conf.erb'"
       info "Run `mv templates/pg_hba_example.conf.erb templates/pg_hba.conf.erb` or diff those files and add the needed lines."
+
+      # example recovery.conf.erb
+      config = File.read(File.dirname(__FILE__) + '/examples/recovery_example.conf.erb')
+      File.open('./templates/recovery_example.conf.erb', 'w') { |f| f.write(config) }
+      info "Wrote './templates/recovery_example.conf.erb'"
+      info "Run `mv templates/recovery_example.conf.erb templates/recovery.conf.erb` or diff those files and add the needed lines."
     end
   end
 end
