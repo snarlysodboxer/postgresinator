@@ -75,11 +75,11 @@ local   all         postgres                          ident
 
 # TYPE  DATABASE    USER        CIDR-ADDRESS          METHOD
 <% if @server.master %>
-<% @cluster.servers.each do |s| %>
-<% unless s.master %>
+  <% @cluster.servers.each do |s| %>
+    <% unless s.master %>
 hostssl replication replicator  <%= s.ip %>/32            md5
-<% end %>
-<% end %>
+    <% end %>
+  <% end %>
 <% end %>
 
 host    all         all         0.0.0.0/0             md5

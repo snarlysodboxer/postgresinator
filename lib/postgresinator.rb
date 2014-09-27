@@ -5,9 +5,6 @@
 require 'rake'
 require 'sshkit'
 require 'sshkit/dsl'
-require 'hashie'
-require 'erb'
-require 'resolv'
 
 load 'postgresinator/pg.rb'
 load 'postgresinator/config.rb'
