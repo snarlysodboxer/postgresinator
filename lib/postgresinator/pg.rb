@@ -1,113 +1,96 @@
 require 'erb'
-require 'hashie'
-require 'resolv'
 
 require './postgresinator.rb'
 
 ## NOTES:
 # tasks without 'desc' description lines are for manual debugging of this
 #   deployment code.
-# postgrestinator does not currently support more than one master or slave per domain for a particular cluster configuration file.
+#
+# postgrestinator does not currently support more than one master or
+#   slave per domain for a particular cluster configuration file, but
+#   that can be accomplished with multiple postgresinator.rb configs.
 #
 # we've choosen to only pass strings (if anything) to tasks. this allows tasks to be
 #   debugged indivudually. only private methods take ruby objects.
 
 namespace :pg do
 
-  task :load_settings do
-    cluster = Hashie::Mash.new(PostgresCluster.settings)
-    cluster.ssh_user            = ENV["USER"]
-    cluster.servers.each do |server|
-      server.ip = Resolv.getaddress(server.domain)
-      server.master_or_slave    = server.master ? "master" : "slave"
-      server.master_domain      = cluster.servers.collect { |s| s.domain if s.master }.first
-      server.master_port        = cluster.servers.collect { |s| s.port if s.master }.first
-      server.container_name     = "#{server.domain}-postgres-#{server.port}-#{server.master_or_slave}"
-      server.data_path          = "/#{server.container_name}-data"
-      server.conf_path          = "/#{server.container_name}-conf"
-      server.docker_run_command = [
-        "--detach", "--tty", "--user", "postgres",
-        "--name", server.container_name,
-        "--volume", "#{server.data_path}:#{cluster.image.data_path}:rw",
-        "--volume", "#{server.conf_path}:#{cluster.image.conf_path}:rw",
-        "--expose", "5432",
-        "--publish", "0.0.0.0:#{server.port}:5432",
-        cluster.image.name
-      ]
-      if server.master
-        cluster.docker_init_command = [
-          #"--interactive", "--rm", "--user", "root",
-          "--rm", "--user", "root",
-          "--volume", "#{server.data_path}:/postgresql-data:rw",
-          "--entrypoint", "/usr/bin/rsync",
-          cluster.image.name, "-ahP", "#{cluster.image.data_path}/", "/postgresql-data/"
-        ]
-      end
-    end
-    @cluster = cluster
-  end
-
-  task :ensure_cluster_data_uniqueness => :load_settings do
-    cluster = @cluster
-    run_locally do
-      names = cluster.servers.collect { |s| s.container_name }
-      fatal "The container names in this cluster are not unique" and exit unless names == names.uniq
-
-      masters = cluster.servers.collect { |s| s.domain if s.master }
-      fatal "You can't set more than one master" and exit unless masters.compact.length == 1
-    end
-  end
-
-  task :ensure_setup => [:load_settings, :ensure_cluster_data_uniqueness] do
+  task :ensure_setup => ['config:load_settings', 'config:ensure_cluster_data_uniqueness'] do |t, args|
+    Rake::Task['config:config_file_not_found'].invoke(args.config_file) unless args.config_file.nil?
+    Rake::Task['config:database_not_found'].invoke(args.database_name) unless args.database_name.nil?
+    Rake::Task['config:domain_not_found'].invoke(args.domain) unless args.domain.nil?
+    Rake::Task['config:role_not_found'].invoke(args.role_name) unless args.role_name.nil?
   end
 
   desc "Setup one or more PostgreSQL instances"
   task :setup => :ensure_setup do
+    # instance variables are lost inside SSHKit's 'on' block, so
+    #   at the beginning of each task we assign @cluster to cluster.
     cluster = @cluster
     cluster.servers.each do |server|
-      Rake::Task[:ensure_access_docker].invoke(server.domain)
+      Rake::Task['pg:ensure_access_docker'].invoke(server.domain)
+      Rake::Task['pg:ensure_access_docker'].reenable
       on "#{cluster.ssh_user}@#{server.domain}" do
-        if container_exists?(server) and container_is_running?(server)
-          restart = false
-        else
-          restart = true
-        end
+        config_file_changed = false
         cluster.image.config_files.each do |config_file|
-          Rake::Task[:upload_config_file].invoke(server.domain, config_file)
-          within '/tmp' do
-            as 'root' do
-              unless test "diff", config_file, "#{server.conf_path}/#{config_file}"
-                execute("mkdir", "-p", server.conf_path)
-                execute("mkdir", "-p", server.data_path)
-                execute("mv", "-b", config_file, "#{server.conf_path}/#{config_file}")
-                execute("chown", "-R", "102:105", server.conf_path)
-                execute("chown", "-R", "102:105", server.data_path)
-                execute("chmod", "700", server.conf_path)
-                execute("chmod", "700", server.data_path)
-                restart = true
-              end
+          next if(config_file == "recovery.conf" and server.master)
+          if config_file_differs?(cluster, server, config_file)
+            Rake::Task['pg:install_config_file'].invoke(server.domain, config_file)
+            Rake::Task['pg:install_config_file'].reenable
+            config_file_changed = true
+          end
+        end
+        fatal_message = "Container #{server.container_name} on #{server.domain} did not stay running more than 2 seconds!"
+        unless container_exists?(server)
+          # no need to run create_container's prerequisite task :ensure_config_files here, so we clear_prerequisites.
+          Rake::Task['pg:create_container'].clear_prerequisites
+          Rake::Task['pg:create_container'].invoke(server.domain)
+          Rake::Task['pg:create_container'].reenable
+          sleep 2
+          fatal fatal_message and raise unless container_is_running?(server)
+        else
+          unless container_is_running?(server)
+            Rake::Task['pg:start_container'].invoke(server.domain)
+            Rake::Task['pg:start_container'].reenable
+            sleep 2
+            fatal fatal_message and raise unless container_is_running?(server)
+          else
+            if config_file_changed
+              Rake::Task['pg:restart_container'].invoke(server.domain)
+              Rake::Task['pg:restart_container'].reenable
+              sleep 2
+              fatal fatal_message and raise unless container_is_running?(server)
+            else
+              info "No config file changes for #{server.container_name} and it is already running; we're setup!"
             end
           end
         end
-        Rake::Task[:restart].invoke(server.master_or_slave) if restart
         if server.master
-          if role_exists?(server, "replicator")
-            info "Role #{role} already exists on #{server.domain}"
+          if role_exists?(cluster, server, "replicator")
+            info "Role 'replicator' already exists on #{server.domain}"
           else
-            Rake::Task[:create_role].invoke(server.domain, "replicator")
+            Rake::Task['pg:create_role'].invoke(server.domain, "replicator", true)
+            Rake::Task['pg:create_role'].reenable
           end
         end
       end
     end
   end
 
-  desc "Check the status of one or more PostgreSQL instances"
+  desc "Check the statuses of each PostgreSQL instance in the cluster"
+  task :statuses => :ensure_setup do
+    cluster = @cluster
+    cluster.servers.each do |server|
+      Rake::Task['pg:status'].invoke(server.domain)
+      Rake::Task['pg:status'].reenable
+    end
+  end
+
+  desc "Check the status of the PostgreSQL instance on domain"
   task :status, [:domain] => :ensure_setup do |t, args|
     cluster = @cluster
-    domain_found = false
     cluster.servers.each do |server|
       next unless args.domain == server.domain
-      domain_found = true
       on "#{cluster.ssh_user}@#{server.domain}" do
         if container_exists?(server)
           info "#{server.container_name} exists on #{server.domain}"
@@ -115,11 +98,11 @@ namespace :pg do
             info ""
             info "#{server.container_name} is running on #{server.domain}"
             info ""
-            Rake::Task[:list_roles].invoke(server.domain)
+            Rake::Task['pg:list_roles'].invoke(server.domain)
             info ""
-            Rake::Task[:list_databases].invoke(server.domain)
+            Rake::Task['pg:list_databases'].invoke(server.domain)
             info ""
-            Rake::Task[:streaming_status].invoke(server.domain)
+            Rake::Task['pg:streaming_status'].invoke(server.domain)
           else
             info "#{server.container_name} is not running on #{server.domain}"
           end
@@ -128,18 +111,20 @@ namespace :pg do
         end
       end
     end
-    fatal "Server domain #{args.domain} not found in the configuration" unless domain_found
   end
 
-  desc "Initiate replication from master to slave(s)"
+  # TODO: figure out when and how to invoke/setup replication
+  #desc "Initiate replication from master to slave(s)"
   task :replicate => :ensure_setup do
     cluster = @cluster
     cluster.servers.each do |server|
       next if server.master
       on "#{cluster.ssh_user}@#{server.domain}" do
-        execute("docker", "stop", server.container_name) if container_is_running?(server)
         as 'root' do
-          fatal "#{server.data_path} on #{server.domain} is not empty, cannot continue!" and exit if test("ls", "-A", "#{server.data_path}/*")
+          fatal_message = "#{server.data_path} on #{server.domain} is not empty, cannot continue! " +
+            "You'll need to delete those files by hand. Be sure you are deleting unimportant data!"
+          fatal fatal_message and raise if files_in_data_path?(server)
+          execute("docker", "stop", server.container_name) if container_is_running?(server)
           capture(
             "bash", "-il", "-c", "\"docker", "run", "--rm", "--interactive", "--user", "postgres",
             "--volume", "#{server.data_path}:#{cluster.image.data_path}:rw",
@@ -148,14 +133,8 @@ namespace :pg do
             "-w", "-h", server.master_domain, "-p", server.master_port,
             "-U", "replicator", "-D", cluster.image.data_path, "-v\""
           ).each_line { |line| info line }
-          @cluster = cluster
-          @server = server
-          template_path = File.expand_path("templates/recovery.conf.erb")
-          host_config   = ERB.new(File.new(template_path).read).result(binding)
-          upload! StringIO.new(host_config), "/tmp/recovery.conf"
-          execute("mv", "/tmp/recovery.conf", "#{server.data_path}/recovery.conf")
-          execute("chown", "102:105", "#{server.data_path}/recovery.conf")
-          execute("chmod", "700", "#{server.data_path}/recovery.conf")
+          Rake::Task['pg:install_config_file'].invoke(server.domain, "recovery.conf")
+          Rake::Task['pg:install_config_file'].reenable
           execute("docker", "start", server.container_name)
         end
       end
@@ -165,13 +144,12 @@ namespace :pg do
   desc "Restore dump_file in /tmp on the master server into database_name"
   task :restore, [:dump_file, :database_name]  => :ensure_setup do |t, args|
     cluster = @cluster
-    Rake::Task[:fatal_database_not_found].invoke(args.database_name)
     cluster.databases.each do |database|
       next unless args.database_name == database.name
       cluster.servers.each do |server|
         on "#{cluster.ssh_user}@#{server.domain}" do
           unless cluster.databases.collect { |d| d.name }.include? args.database_name
-            fatal "#{args.database_name} is not defined in the settings" and exit
+            fatal "#{args.database_name} is not defined in the settings" and raise
           end
           if server.master
             ensure_role(cluster, server, database.role)
@@ -197,84 +175,70 @@ namespace :pg do
     end
   end
 
-  desc "Restart postgres on the master server or the slave servers"
-  task :restart, [:master_or_slave] => :ensure_setup do |t, args|
+  task :ensure_config_files, [:domain] => :ensure_setup do |t, args|
     cluster = @cluster
     cluster.servers.each do |server|
-      next unless args.master_or_slave == server.master_or_slave
+      next unless args.domain == server.domain
       on "#{cluster.ssh_user}@#{server.domain}" do
-        if container_exists?(server)
-          if container_is_running?(server)
-            warn "Restarting a running container named #{server.container_name}"
-            execute("docker", "restart", server.container_name)
-          else
-            warn "Starting an existing but non-running container named #{server.container_name}"
-            execute("docker", "start", server.container_name)
-          end
-        else
-          warn "Starting a new container named #{server.container_name}"
-          as 'root' do
-            execute("docker", "run", cluster.docker_init_command)
-            execute("docker", "run", server.docker_run_command)
+        cluster.image.config_files.each do |config_file|
+          if config_file_differs?(cluster, server, config_file)
+            Rake::Task['pg:install_config_file'].invoke(server.domain, config_file)
+            Rake::Task['pg:install_config_file'].reenable
           end
         end
-        sleep 2
-        fatal("Container #{server.container_name} on #{server.domain} did not stay running more than 2 seconds!") and exit unless container_is_running?(server)
       end
     end
   end
 
-  task :fatal_domain_not_found, [:domain] do |t, args|
-    run_locally do
-      cluster = @cluster
-      domain_found = false
-      cluster.servers.each do |server|
-        next unless server.domain == args.domain
-        domain_found = true
+  task :create_container, [:domain] => :ensure_config_files do |t, args|
+    cluster = @cluster
+    cluster.servers.each do |server|
+      next unless args.domain == server.domain
+      on "#{cluster.ssh_user}@#{server.domain}" do
+        warn "Starting a new container named #{server.container_name}"
+        as 'root' do
+          execute("docker", "run", cluster.docker_init_command) if server.master
+          execute("docker", "run", server.docker_run_command)
+        end
       end
-      fatal "Server domain #{args.domain} not found in the configuration" unless domain_found
     end
   end
 
-  task :fatal_role_not_found, [:role_name] do |t, args|
-    run_locally do
-      cluster = @cluster
-      role_found = false
-      cluster.databases.each do |database|
-        next unless database.role == args.role_name
-        role_found = true
+  task :restart_container, [:domain] => :ensure_setup do |t, args|
+    cluster = @cluster
+    cluster.servers.each do |server|
+      next unless args.domain == server.domain
+      on "#{cluster.ssh_user}@#{server.domain}" do
+        warn "Restarting a running container named #{server.container_name}"
+        execute("docker", "restart", server.container_name)
       end
-      fatal "Role #{args.role_name} not found in the configuration" unless role_found
     end
   end
 
-  task :fatal_database_not_found, [:database_name] do |t, args|
-    run_locally do
-      cluster = @cluster
-      database_found = false
-      cluster.databases.each do |database|
-        next unless database.name == args.database_name
-        database_found = true
+  task :start_container, [:domain] => :ensure_setup do |t, args|
+    cluster = @cluster
+    cluster.servers.each do |server|
+      next unless args.domain == server.domain
+      on "#{cluster.ssh_user}@#{server.domain}" do
+        warn "Starting an existing but non-running container named #{server.container_name}"
+        execute("docker", "start", server.container_name)
       end
-      fatal "Database #{args.domain} not found in the configuration" unless database_found
     end
   end
 
-  task :fatal_config_file_not_found, [:config_file] do |t, args|
-    run_locally do
-      cluster = @cluster
-      config_file_found = false
-      cluster.config_files.each do |config_file|
-        next unless config_file == args.config_file
-        config_file_found = true
+  desc "Print the command to enter psql interactive mode on domain"
+  task :print_interactive, [:domain] => :ensure_setup do |t, args|
+    cluster = @cluster
+    cluster.servers.each do |server|
+      next unless args.domain == server.domain
+      run_locally do
+        info "You can paste the following command into a terminal on #{server.domain} to enter psql interactive mode for #{server.container_name}:"
+        info "docker run --rm --interactive --tty --link #{server.container_name}:postgres --entrypoint /bin/bash #{cluster.image.name} -lic '/usr/bin/psql -h $POSTGRES_PORT_5432_TCP_ADDR -p $POSTGRES_PORT_5432_TCP_PORT -U postgres'"
       end
-      fatal "Config file #{args.config_file} not found in the configuration" unless config_file_found
-      config_template_found = test("ls", "-A", "templates/#{args.config_file}.erb")
-      fatal "Config template file templates/#{args.config_file}.erb not found locally" unless config_template_found
     end
   end
 
-  task :ensure_access_docker, [:domain] do |t, args|
+  task :ensure_access_docker, [:domain] => :ensure_setup do |t, args|
     cluster = @cluster
     on "#{cluster.ssh_user}@#{args.domain}" do
       as cluster.ssh_user do
@@ -286,31 +250,34 @@ namespace :pg do
     end
   end
 
-  task :upload_config_file, [:domain, :config_file] => :ensure_setup do |t, args|
+  task :install_config_file, [:domain, :config_file] => :ensure_setup do |t, args|
     cluster = @cluster
-    Rake::Task[:fatal_domain_not_found].invoke(args.domain)
-    Rake::Task[:fatal_config_file_not_found].invoke(args.config_file)
     cluster.servers.each do |server|
       next unless server.domain == args.domain
       on "#{cluster.ssh_user}@#{args.domain}" do
-        @cluster  = cluster # needed for ERB
-        @server   = server  # needed for ERB
-        template_path = File.expand_path("templates/#{args.config_file}.erb")
-        host_config   = ERB.new(File.new(template_path).read).result(binding)
-        upload! StringIO.new(host_config), "/tmp/#{args.config_file}"
+        as 'root' do
+          execute("mkdir", "-p", server.conf_path) unless test("test", "-d", server.conf_path)
+          execute("mkdir", "-p", server.data_path) unless test("test", "-d", server.data_path)
+          generated_config_file = generate_config_file(cluster, server, args.config_file)
+          upload! StringIO.new(generated_config_file), "/tmp/#{args.config_file}"
+          execute("mv", "/tmp/#{args.config_file}", "#{server.data_path}/#{args.config_file}")
+          execute("chown", "-R", "102:105", server.conf_path)
+          execute("chown", "-R", "102:105", server.data_path)
+          execute("chmod", "700", server.conf_path)
+          execute("chmod", "700", server.data_path)
+        end
       end
     end
   end
 
   task :list_roles, [:domain] => :ensure_setup do |t, args|
     cluster = @cluster
-    Rake::Task[:fatal_domain_not_found].invoke(args.domain)
     cluster.servers.each do |server|
       next unless server.domain == args.domain
       on "#{cluster.ssh_user}@#{args.domain}" do
         capture("docker", "run", "--rm",
           "--entrypoint", "/bin/bash",
-          "--link", "#{args.container_name}:postgres", cluster.image.name,
+          "--link", "#{server.container_name}:postgres", cluster.image.name,
           "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
           "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres",
           "-c", "\"\\du\"'").each_line { |line| info line }
@@ -320,23 +287,21 @@ namespace :pg do
 
   task :list_databases, [:domain] => :ensure_setup do |t, args|
     cluster = @cluster
-    Rake::Task[:fatal_domain_not_found].invoke(args.domain)
     cluster.servers.each do |server|
       next unless server.domain == args.domain
       on "#{cluster.ssh_user}@#{args.domain}" do
-        capture "docker", "run", "--rm",
+        capture("docker", "run", "--rm",
           "--entrypoint", "/bin/bash",
           "--link", "#{server.container_name}:postgres", cluster.image.name,
           "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
           "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres",
-          "-c", "\"\\l\"'".each_line { |line| info line }
+          "-c", "\"\\l\"'").each_line { |line| info line }
       end
     end
   end
 
   task :streaming_status, [:domain] => :ensure_setup do |t, args|
     cluster = @cluster
-    Rake::Task[:fatal_domain_not_found].invoke(args.domain)
     cluster.servers.each do |server|
       next unless server.domain == args.domain
       on "#{cluster.ssh_user}@#{args.domain}" do
@@ -364,8 +329,6 @@ namespace :pg do
 
   task :create_role, [:domain, :role_name] => :ensure_setup do |t, args|
     cluster = @cluster
-    Rake::Task[:fatal_domain_not_found].invoke(args.domain)
-    Rake::Task[:fatal_role_not_found].invoke(args.role_name)
     cluster.servers.each do |server|
       next unless server.domain == args.domain
       on "#{cluster.ssh_user}@#{args.domain}" do
@@ -382,8 +345,7 @@ namespace :pg do
 
   task :create_database, [:domain, :database_name] => :ensure_setup do |t, args|
     cluster = @cluster
-    Rake::Task[:fatal_domain_not_found].invoke(args.domain)
-    Rake::Task[:fatal_database_not_found].invoke(args.database_name)
+    Rake::Task[].invoke(args.domain)
     cluster.databases.each do |database|
       next unless database.name == args.database_name
       cluster.servers.each do |server|
@@ -404,8 +366,6 @@ namespace :pg do
 
   task :grant_database, [:domain, :database_name] => :ensure_setup do |t, args|
     cluster = @cluster
-    Rake::Task[:fatal_domain_not_found].invoke(args.domain)
-    Rake::Task[:fatal_database_not_found].invoke(args.database_name)
     cluster.databases.each do |database|
       next unless database.name == args.database_name
       cluster.servers.each do |server|
@@ -423,7 +383,23 @@ namespace :pg do
   end
 
   private
-    def role_exists?(server, role)
+    def files_in_data_path?(server)
+      test("[", "\"$(ls", "-A", "#{server.data_path})\"", "]")
+    end
+
+    def config_file_differs?(cluster, server, config_file)
+      generated_config_file = generate_config_file(cluster, server, config_file)
+      capture("cat", "#{server.conf_path}/#{config_file}") == generated_config_file
+    end
+
+    def generate_config_file(cluster, server, config_file)
+      @cluster      = cluster # needed for ERB
+      @server       = server  # needed for ERB
+      template_path = File.expand_path("templates/#{args.config_file}.erb")
+      ERB.new(File.new(template_path).read).result(binding)
+    end
+
+    def role_exists?(cluster, server, role)
       test("echo", "\"SELECT", "*", "FROM", "pg_user", "WHERE", "usename", "=", "'#{role}';\"", "|",
         "docker", "run", "--rm", "--interactive",
         "--entrypoint", "/bin/bash",
