@@ -23,15 +23,20 @@ namespace :config do
         "--publish", "0.0.0.0:#{server.port}:5432",
         cluster.image.name
       ]
-      if server.master
-        cluster.docker_init_command = [
-          #"--interactive", "--rm", "--user", "root",
-          "--rm", "--user", "root",
-          "--volume", "#{server.data_path}:/postgresql-data:rw",
-          "--entrypoint", "/usr/bin/rsync",
-          cluster.image.name, "-ahP", "#{cluster.image.data_path}/", "/postgresql-data/"
-        ]
-      end
+      server.docker_init_command = [
+        "--rm", "--user", "root",
+        "--volume", "#{server.data_path}:/postgresql-data:rw",
+        "--entrypoint", "/usr/bin/rsync",
+        cluster.image.name, "-ah", "#{cluster.image.data_path}/", "/postgresql-data/"
+      ]
+      server.docker_replicate_command = [
+        "--rm", "--user", "postgres",
+        "--volume", "#{server.data_path}:#{cluster.image.data_path}:rw",
+        "--entrypoint", "/usr/bin/pg_basebackup",
+        cluster.image.name,
+        "-w", "-h", server.master_domain, "-p", server.master_port,
+        "-U", "replicator", "-D", cluster.image.data_path, "-v"
+      ]
     end
     @cluster = cluster
   end
