@@ -10,6 +10,7 @@ namespace :config do
       server.ip = Resolv.getaddress(server.domain)
       server.master_or_slave    = server.master ? "master" : "slave"
       server.master_domain      = cluster.servers.collect { |s| s.domain if s.master }.first
+      server.master_ip          = Resolv.getaddress(server.master_domain)
       server.master_port        = cluster.servers.collect { |s| s.port if s.master }.first
       server.container_name     = "#{server.master_domain}-postgres-#{server.port}-#{server.master_or_slave}"
       server.data_path          = "/#{server.container_name}-data"
@@ -35,7 +36,7 @@ namespace :config do
         "--entrypoint", "/usr/bin/pg_basebackup",
         cluster.image.name,
         "-w", "-h", server.master_domain, "-p", server.master_port,
-        "-U", "replicator", "-D", cluster.image.data_path, "-v"
+        "-U", "replicator", "-D", cluster.image.data_path, "-v", "-x"
       ]
     end
     @cluster = cluster

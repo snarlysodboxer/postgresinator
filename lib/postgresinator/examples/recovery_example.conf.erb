@@ -1,3 +1,3 @@
 standby_mode = 'on'
-primary_conninfo = 'host=<%= @server.ip %> port=<%= @server.port %> user=replicator password=yourpassword sslmode=require'
-trigger_file = '<%= @cluster.image.conf_path %>/postgresql.trigger'
+primary_conninfo = 'host=<%= @server.master_ip %> port=<%= @server.master_port %> user=replicator password=yourpassword sslmode=require'
+trigger_file = '<%= @cluster.image.data_path %>/postgresql.trigger'

@@ -16,11 +16,12 @@ require './postgresinator.rb'
 namespace :pg do
 
   task :ensure_setup => ['config:load_settings', 'config:ensure_cluster_data_uniqueness'] do |t, args|
+    # use 'rake pg:COMMAND debug=true' for debugging
     SSHKit.config.output_verbosity = Logger::DEBUG if ENV['debug'] == "true"
     Rake::Task['config:config_file_not_found'].invoke(args.config_file) unless args.config_file.nil?
     Rake::Task['config:database_not_found'].invoke(args.database_name) unless args.database_name.nil?
     Rake::Task['config:domain_not_found'].invoke(args.domain) unless args.domain.nil?
-    Rake::Task['config:role_not_found'].invoke(args.role_name) unless args.role_name.nil?
+    Rake::Task['config:role_not_found'].invoke(args.role_name) unless(args.role_name.nil? or args.force == "true")
   end
 
   desc "Idempotently setup one or more PostgreSQL instances using values in ./postgresinator.rb"
@@ -31,7 +32,7 @@ namespace :pg do
     cluster.servers.each do |server|
       Rake::Task['pg:ensure_access_docker'].invoke(server.domain)
       Rake::Task['pg:ensure_access_docker'].reenable
-      # 'on', 'execute', 'run_locally', 'as', 'info', 'warn', and 'fatal' are from SSHKit
+      # 'on', 'run_locally', 'as', 'execute', 'info', 'warn', and 'fatal' are from SSHKit
       on "#{cluster.ssh_user}@#{server.domain}" do
         config_file_changed = false
         cluster.image.config_files.each do |config_file|
@@ -43,7 +44,8 @@ namespace :pg do
           end
         end
         unless container_exists?(server)
-          # create_container's prerequisite task :ensure_config_files is for manual use, so we clear_prerequisites.
+          # create_container's prerequisite task :ensure_config_files is for manual
+          #   use of create_container, so here we clear_prerequisites.
           Rake::Task['pg:create_container'].clear_prerequisites
           Rake::Task['pg:create_container'].invoke(server.domain)
           Rake::Task['pg:create_container'].reenable
@@ -60,6 +62,8 @@ namespace :pg do
             end
           end
         end
+        #sleep to allow postgres to start up before subsequent commands against it
+        sleep 3
         if server.master
           if role_exists?(cluster, server, "replicator")
             info "Role 'replicator' already exists on #{server.domain}"
@@ -93,10 +97,13 @@ namespace :pg do
           info "#{server.container_name} is running on #{server.domain}"
           info ""
           Rake::Task['pg:list_roles'].invoke(server.domain)
+          Rake::Task['pg:list_roles'].reenable
           info ""
           Rake::Task['pg:list_databases'].invoke(server.domain)
+          Rake::Task['pg:list_databases'].reenable
           info ""
           Rake::Task['pg:streaming_status'].invoke(server.domain)
+          Rake::Task['pg:streaming_status'].reenable
         else
           info "#{server.container_name} is not running on #{server.domain}"
         end
@@ -156,6 +163,7 @@ namespace :pg do
     server = cluster.servers.select { |s| s.domain == args.domain }.first
     on "#{cluster.ssh_user}@#{server.domain}" do
       cluster.image.config_files.each do |config_file|
+        next if config_file == "recovery.conf"
         if config_file_differs?(cluster, server, config_file)
           Rake::Task['pg:install_config_file'].invoke(server.domain, config_file)
           Rake::Task['pg:install_config_file'].reenable
@@ -170,7 +178,7 @@ namespace :pg do
     master_server = cluster.servers.select { |s| s.master }.first
     unless server.master
       on "#{cluster.ssh_user}@#{master_server.domain}" do
-        fatal "Master must be running before creating a slave" unless container_is_running?(master_server)
+        fatal "Master must be running before creating a slave" and raise unless container_is_running?(master_server)
       end
     end
     on "#{cluster.ssh_user}@#{server.domain}" do
@@ -268,7 +276,7 @@ namespace :pg do
         "--link", "#{server.container_name}:postgres", cluster.image.name,
         "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
         "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres",
-        "-c", "\"\\l\"'").each_line { |line| info line }
+        "-a", "-c", "\"\\l\"'").each_line { |line| info line }
     end
   end
 
@@ -283,8 +291,9 @@ namespace :pg do
           "--entrypoint", "/bin/bash",
           "--link", "#{server.container_name}:postgres", cluster.image.name,
           "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-          "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres'").each_line { |line| info line }
+          "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres", "-xa'").each_line { |line| info line }
       else
+        # TODO: fix this for slave servers
         info "Streaming status of #{server.container_name} on #{server.domain}:"
         capture("echo", "\"select", "now()", "-", "pg_last_xact_replay_timestamp()",
           "AS", "replication_delay;\"", "|",
@@ -297,12 +306,14 @@ namespace :pg do
     end
   end
 
-  task :create_role, [:domain, :role_name] => :ensure_setup do |t, args|
+  task :create_role, [:domain, :role_name, :force] => :ensure_setup do |t, args|
+    args.with_defaults :force => "false"
     cluster = @cluster
     server = cluster.servers.select { |s| s.domain == args.domain }.first
     on "#{cluster.ssh_user}@#{args.domain}" do
       execute("echo", "\"CREATE", "ROLE", "\\\"#{args.role_name}\\\"",
-        "WITH", "LOGIN", "ENCRYPTED", "PASSWORD", "'#{args.role_name}'", "REPLICATION", "CREATEDB;\"", "|",
+        "WITH", "LOGIN", "ENCRYPTED", "PASSWORD", "'#{args.role_name}'",
+        "REPLICATION", "CREATEDB;\"", "|",
         "docker", "run", "--rm", "--interactive",
         "--entrypoint", "/bin/bash",
         "--link", "#{server.container_name}:postgres", cluster.image.name,
@@ -385,7 +396,7 @@ namespace :pg do
       generated_config_file = generate_config_file(cluster, server, config_file)
       as 'root' do
         if test("[", "-f", "#{server.conf_path}/#{config_file}", "]")
-          capture("cat", "#{server.conf_path}/#{config_file}") == generated_config_file
+          capture("cat", "#{server.conf_path}/#{config_file}") != generated_config_file
         else
           true
         end
