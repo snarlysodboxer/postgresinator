@@ -1,7 +1,7 @@
 Gem::Specification.new do |s|
   s.name        = 'postgresinator'
-  s.version     = '0.0.0'
-  s.date        = '2014-09-19'
+  s.version     = '0.0.1'
+  s.date        = '2014-10-04'
   s.summary     = "Deploy PostgreSQL"
   s.description = "An Opinionated PostgreSQL Deployment gem"
   s.authors     = ["david amick"]
@@ -19,6 +19,6 @@ Gem::Specification.new do |s|
   s.add_runtime_dependency 'sshkit',      '= 1.5.1'
   s.add_runtime_dependency 'hashie',      '= 3.2.0'
   s.homepage    =
-    'http://rubygems.org/gems/postgresinator'
-  s.license       = 'MIT'
+    'https://github.com/snarlysodboxer/postgresinator'
+  s.license       = 'GNU'
 end

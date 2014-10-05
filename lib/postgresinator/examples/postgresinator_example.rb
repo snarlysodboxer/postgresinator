@@ -2,7 +2,7 @@ class PostgresCluster
   def self.settings
     {
       "image"                       => {
-        "name"                        => "snarlysodboxer/postgresql:0.0.0",
+        "name"                        => "snarlysodboxer/postgresql:0.0.1",
         "config_files"                => ["postgresql.conf", "pg_hba.conf", "recovery.conf"],
         "data_path"                   => "/var/lib/postgresql/9.1/main",
         "conf_path"                   => "/etc/postgresql/9.1/main",
