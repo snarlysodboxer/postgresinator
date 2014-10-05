@@ -6,10 +6,6 @@ require './postgresinator.rb'
 # tasks without 'desc' description lines are for manual debugging of this
 #   deployment code.
 #
-# postgrestinator does not currently support more than one master or
-#   slave per domain for a particular cluster configuration file, but
-#   that can be accomplished with multiple postgresinator.rb configs.
-#
 # we've choosen to only pass strings (if anything) to tasks. this allows tasks to be
 #   debugged individually. only private methods take ruby objects.
 

@@ -5,6 +5,12 @@ postgresinator
 
 This library uses Rake and SSHKit, and relies on SSH access with passwordless sudo rights, as well as Docker installed on the hosts.
 
+While `postgrestinator` does not currently support more than one master or slave per 'domain' (as defined in postgresinator.rb), you can easily have many instances of PostgreSQL on the same domain(s) by creating multiple postgresinator.rb configs (in different directories, which can be matched using version control with Gemfiles.) `postgresinator` aims to not clober over anything; if you use multiple postgresinator.rb configs referencing the same domains, you need to manually verify they are not attempting to setup more than one instance on the same port for a paricular domain (host).
+
+`postgresinator` currently always exposes itself to the specified port on the host, but in future versions aims to support only exposing itself to other containers for those whose services are entirely dockerized.
+
+PostgreSQL only does streaming replication of an entire instance to an entire instance; all databases per instance are streamed to the slave(s).
+
 Currently only tested against PostgreSQL 9.1, but should work just as well for newer versions.
 
 ### Installation:
