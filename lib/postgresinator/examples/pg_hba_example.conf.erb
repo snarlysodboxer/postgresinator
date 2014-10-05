@@ -75,14 +75,14 @@ local   all         postgres                          ident
 
 # TYPE  DATABASE    USER        CIDR-ADDRESS          METHOD
 <% if @server.master %>
-  <% @cluster.servers.each do |s| %>
-    <% unless s.master %>
-hostssl replication replicator  <%= s.ip %>/32            md5
+  <% @cluster.servers.each do |server| %>
+    <% unless server.master %>
+hostssl replication replicator  <%= server.ip %>/32    trust
     <% end %>
   <% end %>
 <% end %>
-
-host    all         all         0.0.0.0/0             md5
+host    all         postgres    172.16.0.0/12         trust # allow docker IPs for localhost access on the host
+host    all         all         172.16.0.0/12         md5
 
 # "local" is for Unix domain socket connections only
 local   all         all                               ident

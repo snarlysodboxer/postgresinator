@@ -16,7 +16,7 @@ require './postgresinator.rb'
 namespace :pg do
 
   task :ensure_setup => ['config:load_settings', 'config:ensure_cluster_data_uniqueness'] do |t, args|
-    # use 'rake pg:COMMAND debug=true' for debugging
+    # use 'rake pg:COMMAND debug=true' for debugging (you can also add --trace if you like)
     SSHKit.config.output_verbosity = Logger::DEBUG if ENV['debug'] == "true"
     Rake::Task['config:config_file_not_found'].invoke(args.config_file) unless args.config_file.nil?
     Rake::Task['config:database_not_found'].invoke(args.database_name) unless args.database_name.nil?
@@ -32,20 +32,23 @@ namespace :pg do
     cluster.servers.each do |server|
       Rake::Task['pg:ensure_access_docker'].invoke(server.domain)
       Rake::Task['pg:ensure_access_docker'].reenable
+      Rake::Task['pg:open_firewall'].invoke(server.domain)
+      Rake::Task['pg:open_firewall'].reenable
       # 'on', 'run_locally', 'as', 'execute', 'info', 'warn', and 'fatal' are from SSHKit
       on "#{cluster.ssh_user}@#{server.domain}" do
         config_file_changed = false
         cluster.image.config_files.each do |config_file|
           next if config_file == "recovery.conf"
           if config_file_differs?(cluster, server, config_file)
+            warn "Config file #{config_file} on #{server.domain} is being updated."
             Rake::Task['pg:install_config_file'].invoke(server.domain, config_file)
             Rake::Task['pg:install_config_file'].reenable
             config_file_changed = true
           end
         end
         unless container_exists?(server)
-          # create_container's prerequisite task :ensure_config_files is for manual
-          #   use of create_container, so here we clear_prerequisites.
+          # the create_container task's prerequisite task :ensure_config_files is
+          #   for manual use of create_container, so here we clear_prerequisites.
           Rake::Task['pg:create_container'].clear_prerequisites
           Rake::Task['pg:create_container'].invoke(server.domain)
           Rake::Task['pg:create_container'].reenable
@@ -62,14 +65,27 @@ namespace :pg do
             end
           end
         end
-        #sleep to allow postgres to start up before subsequent commands against it
+        # sleep to allow postgres to start up before running subsequent commands against it
         sleep 3
         if server.master
-          if role_exists?(cluster, server, "replicator")
-            info "Role 'replicator' already exists on #{server.domain}"
-          else
+          unless role_exists?(cluster, server, "replicator")
+            info "Creating role 'replicator' #{server.domain}"
             Rake::Task['pg:create_role'].invoke(server.domain, "replicator")
             Rake::Task['pg:create_role'].reenable
+          end
+          cluster.databases.each do |database|
+            unless role_exists?(cluster, server, database.role)
+              info "Creating role #{database.role} on #{server.domain}"
+              Rake::Task['pg:create_role'].invoke(server.domain, database.role)
+              Rake::Task['pg:create_role'].reenable
+            end
+            unless database_exists?(cluster, server, database)
+              info "Creating database #{database.name} on #{server.domain}"
+              Rake::Task['pg:create_database'].invoke(server.domain, database.name)
+              Rake::Task['pg:create_database'].reenable
+              Rake::Task['pg:grant_database'].invoke(server.domain, database.name)
+              Rake::Task['pg:grant_database'].reenable
+            end
           end
         end
       end
@@ -120,29 +136,39 @@ namespace :pg do
     # we only restore on the master server
     server = cluster.servers.select { |s| s.master }.first
     on "#{cluster.ssh_user}@#{server.domain}" do
-      unless cluster.databases.collect { |d| d.name }.include? args.database_name
-        fatal "#{args.database_name} is not defined in the settings" and raise
-      end
       if server.master
-        if role_exists?(cluster, server, database.role)
-          info "Role #{database.role} already exists on #{server.domain}"
-        else
-          Rake::Task['pg:create_role'].invoke(server.domain, database.role)
-        end
         clean = ""
-        if database_exists?(cluster, server, database)
-          confirm_database_overwrite? ? clean = "--clean" : exit(0)
-        else
-          Rake::Task['pg:create_database'].invoke(server.domain, database.name)
-          Rake::Task['pg:grant_database'].invoke(server.domain, database.name)
+        unless database_empty?(cluster, server, database)
+          if confirm_database_overwrite?(server, database); clean = "--clean"; else exit(0); end
         end
         execute("docker", "run", "--rm",
           "--volume", "/tmp:/tmp:rw",
           "--entrypoint", "/bin/bash",
-          "--link", "#{server.container_name}:postgres", cluster.image.name,
-          "-c", "'/usr/bin/pg_restore", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-          "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres", clean,
+          "--volumes-from", server.container_name,
+          cluster.image.name,
+          "-c", "'/usr/bin/pg_restore", "-U", "postgres", clean,
           "-d", database.name, "-F", "tar", "-v", "/tmp/#{args.dump_file}'"
+        )
+      end
+    end
+  end
+
+  desc "Dump 'database_name' into /tmp/'dump_file' on the master server."
+  task :dump, [:dump_file, :database_name]  => :ensure_setup do |t, args|
+    cluster = @cluster
+    database = cluster.databases.select { |d| d.name == args.database_name }.first
+    # we only dump from the master server
+    server = cluster.servers.select { |s| s.master }.first
+    on "#{cluster.ssh_user}@#{server.domain}" do
+      if server.master
+        confirm_file_overwrite?(server, args.dump_file) if file_exists?("/tmp/#{args.dump_file}")
+        execute("docker", "run", "--rm",
+          "--volume", "/tmp:/tmp:rw",
+          "--entrypoint", "/bin/bash",
+          "--volumes-from", server.container_name,
+          cluster.image.name,
+          "-c", "'/usr/bin/pg_dump", "-U", "postgres", "-F", "tar",
+          "-v", database.name, ">", "/tmp/#{args.dump_file}'"
         )
       end
     end
@@ -154,7 +180,7 @@ namespace :pg do
     server = cluster.servers.select { |s| s.domain == args.domain }.first
     run_locally do
       info "You can paste the following command into a terminal on #{server.domain} to enter psql interactive mode for #{server.container_name}:"
-      info "docker run --rm --interactive --tty --link #{server.container_name}:postgres --entrypoint /bin/bash #{cluster.image.name} -lic '/usr/bin/psql -h $POSTGRES_PORT_5432_TCP_ADDR -p $POSTGRES_PORT_5432_TCP_PORT -U postgres'"
+      info "docker run --rm --interactive --tty --volumes-from #{server.container_name} --entrypoint /bin/bash #{cluster.image.name} -lic '/usr/bin/psql -U postgres'"
     end
   end
 
@@ -188,7 +214,7 @@ namespace :pg do
           "You'll need to delete those files by hand. Be sure you are not deleting important data!"
         fatal fatal_message and raise if files_in_data_path?(server)
         execute("mkdir", "-p", server.data_path) unless test("test", "-d", server.data_path)
-        execute("chown", "-R", "102:105", server.data_path)
+        execute("chown", "-R", "#{cluster.image.postgres_uid}:#{cluster.image.postgres_gid}", server.data_path)
         execute("chmod", "700", server.data_path)
         execute("docker", "run", server.docker_init_command)
         unless server.master
@@ -243,12 +269,13 @@ namespace :pg do
     server = cluster.servers.select { |s| s.domain == args.domain }.first
     on "#{cluster.ssh_user}@#{args.domain}" do
       as 'root' do
+        # TODO: get this recovery.conf dependancy out of here?
         path = args.config_file == "recovery.conf" ? server.data_path : server.conf_path
         execute("mkdir", "-p", path) unless test("test", "-d", path)
         generated_config_file = generate_config_file(cluster, server, args.config_file)
         upload! StringIO.new(generated_config_file), "/tmp/#{args.config_file}"
         execute("mv", "/tmp/#{args.config_file}", "#{path}/#{args.config_file}")
-        execute("chown", "-R", "102:105", path)
+        execute("chown", "-R", "#{cluster.image.postgres_uid}:#{cluster.image.postgres_gid}", path)
         execute("chmod", "700", path)
       end
     end
@@ -260,9 +287,9 @@ namespace :pg do
     on "#{cluster.ssh_user}@#{args.domain}" do
       capture("docker", "run", "--rm",
         "--entrypoint", "/bin/bash",
-        "--link", "#{server.container_name}:postgres", cluster.image.name,
-        "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-        "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres",
+        "--volumes-from", server.container_name,
+        cluster.image.name,
+        "-c", "'/usr/bin/psql", "-U", "postgres",
         "-c", "\"\\du\"'").each_line { |line| info line }
     end
   end
@@ -273,9 +300,9 @@ namespace :pg do
     on "#{cluster.ssh_user}@#{args.domain}" do
       capture("docker", "run", "--rm",
         "--entrypoint", "/bin/bash",
-        "--link", "#{server.container_name}:postgres", cluster.image.name,
-        "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-        "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres",
+        "--volumes-from", server.container_name,
+        cluster.image.name,
+        "-c", "'/usr/bin/psql", "-U", "postgres",
         "-a", "-c", "\"\\l\"'").each_line { |line| info line }
     end
   end
@@ -286,22 +313,22 @@ namespace :pg do
     on "#{cluster.ssh_user}@#{args.domain}" do
       if server.master
         info "Streaming status of #{server.container_name} on #{server.domain}:"
-        capture("echo", "\"select", "*", "from", "pg_stat_replication;\"", "|",
+        capture("echo", "\"SELECT", "*", "FROM", "pg_stat_replication;\"", "|",
           "docker", "run", "--rm", "--interactive",
           "--entrypoint", "/bin/bash",
-          "--link", "#{server.container_name}:postgres", cluster.image.name,
-          "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-          "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres", "-xa'").each_line { |line| info line }
+          "--volumes-from", server.container_name,
+          cluster.image.name,
+          "-c", "'/usr/bin/psql", "-U", "postgres", "-xa'").each_line { |line| info line }
       else
         # TODO: fix this for slave servers
         info "Streaming status of #{server.container_name} on #{server.domain}:"
-        capture("echo", "\"select", "now()", "-", "pg_last_xact_replay_timestamp()",
+        capture("echo", "\"SELECT", "now()", "-", "pg_last_xact_replay_timestamp()",
           "AS", "replication_delay;\"", "|",
           "docker", "run", "--rm", "--interactive",
           "--entrypoint", "/bin/bash",
-          "--link", "#{server.container_name}:postgres", cluster.image.name,
-          "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-          "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres'").each_line { |line| info line }
+          "--volumes-from", server.container_name,
+          cluster.image.name,
+          "-c", "'/usr/bin/psql", "-U", "postgres'").each_line { |line| info line }
       end
     end
   end
@@ -316,9 +343,9 @@ namespace :pg do
         "REPLICATION", "CREATEDB;\"", "|",
         "docker", "run", "--rm", "--interactive",
         "--entrypoint", "/bin/bash",
-        "--link", "#{server.container_name}:postgres", cluster.image.name,
-        "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-        "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres'")
+        "--volumes-from", server.container_name,
+        cluster.image.name,
+        "-c", "'/usr/bin/psql", "-U", "postgres'")
     end
   end
 
@@ -332,9 +359,9 @@ namespace :pg do
         "template0", "ENCODING", "'UTF8';\"", "|",
         "docker", "run", "--rm", "--interactive",
         "--entrypoint", "/bin/bash",
-        "--link", "#{server.container_name}:postgres", cluster.image.name,
-        "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-        "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres'")
+        "--volumes-from", server.container_name,
+        cluster.image.name,
+        "-c", "'/usr/bin/psql", "-U", "postgres'")
     end
   end
 
@@ -347,9 +374,9 @@ namespace :pg do
         "\\\"#{database.name}\\\"", "to", "\\\"#{database.role}\\\";\"", "|",
         "docker", "run", "--rm", "--interactive",
         "--entrypoint", "/bin/bash",
-        "--link", "#{server.container_name}:postgres", cluster.image.name,
-        "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-        "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres'")
+        "--volumes-from", server.container_name,
+        cluster.image.name,
+        "-c", "'/usr/bin/psql", "-U", "postgres'")
     end
   end
 
@@ -360,7 +387,7 @@ namespace :pg do
       as "root" do
         inner_server_crt = "#{cluster.image.data_path}/server.crt"
         outer_server_crt = "#{server.data_path}/server.crt"
-        unless test "[", "-f", outer_server_crt, "]"
+        unless file_exists?(outer_server_crt)
           execute("docker", "run",
             "--rm", "--user", "root", "--entrypoint", "/bin/ln",
             "--volume", "#{server.data_path}:#{cluster.image.data_path}:rw",
@@ -370,13 +397,25 @@ namespace :pg do
         end
         inner_server_key = "#{cluster.image.data_path}/server.key"
         outer_server_key = "#{server.data_path}/server.key"
-        unless test "[", "-f", outer_server_key, "]"
+        unless file_exists?(outer_server_key)
           execute("docker", "run",
             "--rm", "--user", "root", "--entrypoint", "/bin/ln",
             "--volume", "#{server.data_path}:#{cluster.image.data_path}:rw",
             cluster.image.name, "-s", "/etc/ssl/private/ssl-cert-snakeoil.key", inner_server_key
           )
           execute("chown", "root.", outer_server_key)
+        end
+      end
+    end
+  end
+
+  task :open_firewall, [:domain] => :ensure_setup do |t, args|
+    cluster = @cluster
+    server = cluster.servers.select { |s| s.domain == args.domain }.first
+    on "#{cluster.ssh_user}@#{args.domain}" do
+      as "root" do
+        if test "ufw", "status"
+          raise "Error during opening UFW firewall" unless test("ufw", "allow", "#{server.port}/tcp")
         end
       end
     end
@@ -395,8 +434,8 @@ namespace :pg do
     def config_file_differs?(cluster, server, config_file)
       generated_config_file = generate_config_file(cluster, server, config_file)
       as 'root' do
-        if test("[", "-f", "#{server.conf_path}/#{config_file}", "]")
-          capture("cat", "#{server.conf_path}/#{config_file}") != generated_config_file
+        if file_exists?("#{server.conf_path}/#{config_file}")
+          capture("cat", "#{server.conf_path}/#{config_file}").chomp != generated_config_file.chomp
         else
           true
         end
@@ -414,18 +453,18 @@ namespace :pg do
       test("echo", "\"SELECT", "*", "FROM", "pg_user", "WHERE", "usename", "=", "'#{role}';\"", "|",
         "docker", "run", "--rm", "--interactive",
         "--entrypoint", "/bin/bash",
-        "--link", "#{server.container_name}:postgres", cluster.image.name,
-        "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-        "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres'", "|",
+        "--volumes-from", server.container_name,
+        cluster.image.name,
+        "-c", "'/usr/bin/psql", "-U", "postgres'", "|",
         "grep", "-q", "'#{role}'")
     end
 
     def database_exists?(cluster, server, database)
       test "docker", "run", "--rm",
         "--entrypoint", "/bin/bash",
-        "--link", "#{server.container_name}:postgres", cluster.image.name,
-        "-c", "'/usr/bin/psql", "-h", "$POSTGRES_PORT_5432_TCP_ADDR",
-        "-p", "$POSTGRES_PORT_5432_TCP_PORT", "-U", "postgres", "-lqt", "|",
+        "--volumes-from", server.container_name,
+         cluster.image.name,
+        "-c", "'/usr/bin/psql", "-U", "postgres", "-lqt", "|",
         "cut", "-d\\|", "-f1", "|", "grep", "-w", "#{database.name}'"
     end
 
@@ -439,11 +478,29 @@ namespace :pg do
         server.container_name).strip == "true"
     end
 
+    def file_exists?(file_name_path)
+      test "[", "-f", file_name_path, "]"
+    end
+
+    def confirm_file_overwrite?(server, dump_file)
+      warn "A file named #{dump_file} already exists on #{server.domain} in /tmp. If you continue, you will overwrite it."
+      warn "Are you positive(Y/N)?"
+      STDOUT.flush
+      case STDIN.gets.chomp.upcase
+      when "Y"
+        true
+      when "N"
+        false
+      else
+        warn "Please enter Y or N"
+        confirm_file_overwrite?(server, dump_file)
+      end
+    end
+
     def confirm_database_overwrite?(server, database)
-      warn "Database #{database.name} already exists on #{server.domain}"
-      warn "If you continue, you must be positive you want to delete and recreate the database on " +
-        "#{server.domain} in the container #{server.container_name} which " +
-        "stores it's data in #{server.data_path} on the host."
+      warn "There is already data in #{database.name} on #{server.domain} in the container " +
+        "#{server.container_name} which stores it's data in #{server.data_path} on the host."
+      warn "If you continue, you must be positive you want to overwrite the existing data."
       warn "Are you positive(Y/N)?"
       STDOUT.flush
       case STDIN.gets.chomp.upcase
@@ -455,5 +512,12 @@ namespace :pg do
         warn "Please enter Y or N"
         confirm_database_overwrite?(server, database)
       end
+    end
+
+    def database_empty?(cluster, server, database)
+      test("docker", "run", "--rm", "--volumes-from", server.container_name,
+        "--entrypoint", "/bin/bash", cluster.image.name, "-lc",
+        "'/usr/bin/psql", "-U", "postgres", "-d", database.name,
+        "-c", "\"\\dt\"", "|", "grep", "-qi", "\"no relations found\"'")
     end
 end
