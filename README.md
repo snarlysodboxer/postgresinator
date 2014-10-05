@@ -20,8 +20,11 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 * Create example configs:
 `rake pg:write_example_configs`
 * Turn them into real configs by removing the `_example` portions of their names, and adjusting their content to fit your needs. (Later when you upgrade to a newer version of postgresinator, you can `pg:write_example_configs` again and diff your current configs against the new configs.)
-* You most likely won't need to adjust the content of the ERB templates, but you can to add any custom PostgreSQL settings you need.
-* You can later update a template (PostgreSQL config) file and run `rake pg:setup` again to update the config files on each instance and restart them.
+* You can add any custom PostgreSQL setting you need by adjusting the content of the ERB templates. You won't need to change them to get started.
+* You can later update a template (PostgreSQL config) and run `rake pg:setup` again to update the config files on each instance and restart them.
+
+*NOTE: Rake does not take arguements with spaces between them, they have to be in the exact form:*
+`rake pg:<command>['arg1,'arg2']`
 
 ### Usage:
 `rake -T` will help remind you of the available commands, see this for more details.
@@ -36,3 +39,9 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 ###### TODOs:
 * Make `pg:statuses` more readable and useful.
 * Make the recovery.conf dependancy more logically defined and adaptable.
+* More thoroughly test recovery from failure of the master; create task(s) for promoting a new master.
+
+###### Debugging:
+* Run any task with `rake <task> debug=true` to get highly verbose debug output. E.G. `rake pg:setup debug=true`
+* You can also add the `--trace` option at the end to see when which task is invoked, and when which task is actually executed.
+* If you want to put on your DevOps hat, you can run `rake -T -A` to see each individually available task, and run them one at a time to debug each one.
