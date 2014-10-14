@@ -23,7 +23,7 @@ namespace :pg do
   desc "Idempotently setup one or more PostgreSQL instances using values in ./postgresinator.rb"
   task :setup => :ensure_setup do
     # instance variables are lost inside SSHKit's 'on' block, so
-    #   at the beginning of each task we assign @cluster to cluster.
+    #   at the beginning of each task we assign cluster to @cluster.
     cluster = @cluster
     cluster.servers.each do |server|
       Rake::Task['pg:ensure_access_docker'].invoke(server.domain)
