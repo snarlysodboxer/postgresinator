@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name        = 'postgresinator'
-  s.version     = '0.0.3'
+  s.version     = '0.0.4'
   s.date        = '2014-10-30'
   s.summary     = "Deploy PostgreSQL"
   s.description = "An Opinionated PostgreSQL Deployment gem"

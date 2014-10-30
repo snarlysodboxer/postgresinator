@@ -6,7 +6,7 @@ namespace :pg do
   desc 'Write example config files'
   task :write_example_configs do
     run_locally do
-      execute "mkdir -p ./templates"
+      execute "mkdir -p ./templates/postgresql"
 
       # example postgresinator.rb
       config = File.read(File.dirname(__FILE__) + '/examples/postgresinator_example.rb')
@@ -16,21 +16,21 @@ namespace :pg do
 
       # example postgresql.conf.erb
       config = File.read(File.dirname(__FILE__) + '/examples/postgresql_example.conf.erb')
-      File.open('./templates/postgresql_example.conf.erb', 'w') { |f| f.write(config) }
-      info "Wrote './templates/postgres_example.conf.erb'"
-      info "Run `mv templates/postgresql_example.conf.erb templates/postgresql.conf.erb` or diff those files and add the needed lines."
+      File.open('./templates/postgresql/postgresql_example.conf.erb', 'w') { |f| f.write(config) }
+      info "Wrote './templates/postgresql/postgres_example.conf.erb'"
+      info "Run `mv templates/postgresql/postgresql_example.conf.erb templates/postgresql/postgresql.conf.erb` or diff those files and add the needed lines."
 
       # example pg_hba.conf.erb
       config = File.read(File.dirname(__FILE__) + '/examples/pg_hba_example.conf.erb')
-      File.open('./templates/pg_hba_example.conf.erb', 'w') { |f| f.write(config) }
-      info "Wrote './templates/pg_hba_example.conf.erb'"
-      info "Run `mv templates/pg_hba_example.conf.erb templates/pg_hba.conf.erb` or diff those files and add the needed lines."
+      File.open('./templates/postgresql/pg_hba_example.conf.erb', 'w') { |f| f.write(config) }
+      info "Wrote './templates/postgresql/pg_hba_example.conf.erb'"
+      info "Run `mv templates/postgresql/pg_hba_example.conf.erb templates/postgresql/pg_hba.conf.erb` or diff those files and add the needed lines."
 
       # example recovery.conf.erb
       config = File.read(File.dirname(__FILE__) + '/examples/recovery_example.conf.erb')
-      File.open('./templates/recovery_example.conf.erb', 'w') { |f| f.write(config) }
-      info "Wrote './templates/recovery_example.conf.erb'"
-      info "Run `mv templates/recovery_example.conf.erb templates/recovery.conf.erb` or diff those files and add the needed lines."
+      File.open('./templates/postgresql/recovery_example.conf.erb', 'w') { |f| f.write(config) }
+      info "Wrote './templates/postgresql/recovery_example.conf.erb'"
+      info "Run `mv templates/postgresql/recovery_example.conf.erb templates/postgresql/recovery.conf.erb` or diff those files and add the needed lines."
     end
   end
 
@@ -98,8 +98,8 @@ namespace :config do
         config_file_found = true
       end
       fatal "Config file #{args.config_file} not found in the configuration" and raise unless config_file_found
-      config_template_found = test("ls", "-A", "templates/#{args.config_file}.erb")
-      fatal "Config template file templates/#{args.config_file}.erb not found locally" and raise unless config_template_found
+      config_template_found = test("ls", "-A", "templates/postgresql/#{args.config_file}.erb")
+      fatal "Config template file templates/postgresql/#{args.config_file}.erb not found locally" and raise unless config_template_found
     end
   end
 

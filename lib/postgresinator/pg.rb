@@ -1,6 +1,6 @@
 require 'erb'
 
-require './postgresinator.rb'
+require './postgresinator.rb' if File.exists?('./postgresinator.rb')
 
 ## NOTES:
 # tasks without 'desc' description lines are for manual debugging of this
@@ -444,7 +444,7 @@ namespace :pg do
     def pg_generate_config_file(cluster, server, config_file)
       @cluster      = cluster # needed for ERB
       @server       = server  # needed for ERB
-      template_path = File.expand_path("templates/#{config_file}.erb")
+      template_path = File.expand_path("templates/postgresql/#{config_file}.erb")
       ERB.new(File.new(template_path).read).result(binding)
     end
 
