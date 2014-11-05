@@ -58,6 +58,7 @@ namespace :config do
         "--volume",   "#{server.conf_path}:#{cluster.image.conf_path}:rw",
         "--expose",   "5432",
         "--publish",  "0.0.0.0:#{server.port}:5432",
+        "--restart", "always",
         cluster.image.name
       ]
       server.docker_init_command = [

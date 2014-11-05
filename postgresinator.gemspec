@@ -1,7 +1,7 @@
 Gem::Specification.new do |s|
   s.name        = 'postgresinator'
-  s.version     = '0.0.4'
-  s.date        = '2014-10-30'
+  s.version     = '0.0.5'
+  s.date        = '2014-11-05'
   s.summary     = "Deploy PostgreSQL"
   s.description = "An Opinionated PostgreSQL Deployment gem"
   s.authors     = ["david amick"]
@@ -16,6 +16,7 @@ Gem::Specification.new do |s|
     "lib/postgresinator/examples/recovery_example.conf.erb"
   ]
   s.required_ruby_version  =              '>= 1.9.3'
+  s.requirements          <<              "Docker ~1.3.1"
   s.add_runtime_dependency 'rake',        '= 10.3.2'
   s.add_runtime_dependency 'sshkit',      '= 1.5.1'
   s.add_runtime_dependency 'hashie',      '= 3.2.0'
