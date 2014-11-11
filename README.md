@@ -3,9 +3,9 @@ postgresinator
 
 *Opinionatedly Deploy PostgreSQL instances, setting up streaming replication to one or more slaves.*
 
-This library uses Rake and SSHKit, and relies on SSH access with passwordless sudo rights, as well as Docker installed on the hosts.
+This library is a Capistrano 3.x plugin, and relies on SSH access with passwordless sudo rights, as well as Docker installed on the hosts.
 
-While `postgrestinator` does not currently support more than one master or slave per 'domain' (as defined in postgresinator.rb), you can easily have many instances of PostgreSQL on the same domain(s) by creating multiple postgresinator.rb configs (in different directories, which can be matched using version control with Gemfiles.) `postgresinator` aims to not clober over anything; if you use multiple postgresinator.rb configs referencing the same domains, you need to manually verify they are not attempting to setup more than one instance on the same port for a paricular domain (host).
+`postgresinator` aims to not clober over anything, however if you use multiple postgresinator.rb configs referencing the same domains, you need to manually verify they are not attempting to setup more than one instance on the same port for a paricular domain (host).
 
 `postgresinator` currently always exposes itself to the specified port on the host, but in future versions aims to support only exposing itself to other containers for those whose services are entirely dockerized.
 
@@ -15,26 +15,26 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 
 ### Installation:
 * `gem install postgresinator` (Or add it to your Gemfile and `bundle install`.)
-* Create a Rakefile which requires postgresinator:
-`echo "require 'postgresinator'" > Rakefile`
+* Create a Capfile which requires postgresinator:
+`echo "require 'postgresinator'" > Capfile`
 * Create example configs:
-`rake pg:write_example_configs`
+`cap staging pg:write_example_configs`
 * Turn them into real configs by removing the `_example` portions of their names, and adjusting their content to fit your needs. (Later when you upgrade to a newer version of postgresinator, you can `pg:write_example_configs` again and diff your current configs against the new configs.)
 * You can add any custom PostgreSQL setting you need by adjusting the content of the ERB templates. You won't need to change them to get started.
-* You can later update a template (PostgreSQL config) and run `rake pg:setup` again to update the config files on each instance and restart them.
+* You can later update a template (PostgreSQL config) and run `cap <stage> pg:setup` again to update the config files on each instance and restart them.
 
 *NOTE: Rake does not take arguements with spaces between them, they have to be in the exact form:*
-`rake pg:<command>['arg1,'arg2']`
+`cap <stage> pg:<command>['arg1,'arg2']`
 
 ### Usage:
 `rake -T` will help remind you of the available commands, see this for more details.
 * After setting up your `postgresinator.rb` config file, simply run:
-`rake pg:setup`
-* Run `rake pg:setup` again to see it find everything is already setup, and do nothing.
-* Run `rake pg:statuses` to see the statuses of each instance. (Note: it usually takes a couple of minutes to start seeing the streaming activity.)
-* Run `rake pg:restore['dump_file','database_name']` to pg_restore a .tar file into the instances.
-* Run `rake pg:dump['dump_file','database_name']` to pg_dump a .tar file.
-* Run `rake pg:print_interactive['domain']` to print the command to enter psql interactive mode on one of the instances.
+`cap <stage> pg:setup`
+* Run `cap <stage> pg:setup` again to see it find everything is already setup, and do nothing.
+* Run `cap <stage> pg:statuses` to see the statuses of each instance. (Note: it usually takes a couple of minutes to start seeing the streaming activity.)
+* Run `cap <stage> pg:restore['dump_file','database_name']` to pg_restore a .tar file into the instances.
+* Run `cap <stage> pg:dump['dump_file','database_name']` to pg_dump a .tar file.
+* Run `cap <stage> pg:print_interactive['domain']` to print the command to enter psql interactive mode on one of the instances.
 
 ###### TODOs:
 * Make `pg:statuses` more readable and useful.
@@ -42,6 +42,5 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 * More thoroughly test recovery from failure of the master; create task(s) for promoting a new master.
 
 ###### Debugging:
-* Run any task with `rake <task> debug=true` to get highly verbose debug output. E.G. `rake pg:setup debug=true`
-* You can also add the `--trace` option at the end to see when which task is invoked, and when which task is actually executed.
-* If you want to put on your DevOps hat, you can run `rake -T -A` to see each individually available task, and run them one at a time to debug each one.
+* You can add the `--trace` option at the end of any rake task to see when which task is invoked, and when which task is actually executed.
+* If you want to put on your DevOps hat, you can run `cap -T -A` to see each individually available task, and run them one at a time to debug each one.

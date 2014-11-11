@@ -1,6 +1,5 @@
-require 'rake'
-require 'sshkit'
-require 'sshkit/dsl'
+require 'capistrano/setup'
+require 'capistrano/deploy'
 
 load 'postgresinator/pg.rb'
 load 'postgresinator/config.rb'

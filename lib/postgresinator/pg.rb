@@ -1,12 +1,10 @@
 require 'erb'
 
-require './postgresinator.rb' if File.exists?('./postgresinator.rb')
-
 ## NOTES:
 # tasks without 'desc' description lines are for manual debugging of this
 #   deployment code.
 #
-# we've choosen to only pass strings (if anything) to tasks. this allows tasks to be
+# only pass strings (if anything) to tasks. this allows tasks to be
 #   debugged individually. only private methods take ruby objects.
 
 namespace :pg do
@@ -70,9 +68,9 @@ namespace :pg do
             Rake::Task['pg:create_role'].reenable
           end
           cluster.databases.each do |database|
-            unless pg_role_exists?(cluster, server, database.role)
-              info "Creating role #{database.role} on #{server.domain}"
-              Rake::Task['pg:create_role'].invoke(server.domain, database.role)
+            unless pg_role_exists?(cluster, server, database.db_role)
+              info "Creating role #{database.db_role} on #{server.domain}"
+              Rake::Task['pg:create_role'].invoke(server.domain, database.db_role)
               Rake::Task['pg:create_role'].reenable
             end
             unless pg_database_exists?(cluster, server, database)
@@ -351,7 +349,7 @@ namespace :pg do
     server = cluster.servers.select { |s| s.domain == args.domain }.first
     on "#{cluster.ssh_user}@#{args.domain}" do
       execute("echo", "\"CREATE", "DATABASE", "\\\"#{database.name}\\\"",
-        "WITH", "OWNER", "\\\"#{database.role}\\\"", "TEMPLATE",
+        "WITH", "OWNER", "\\\"#{database.db_role}\\\"", "TEMPLATE",
         "template0", "ENCODING", "'UTF8';\"", "|",
         "docker", "run", "--rm", "--interactive",
         "--entrypoint", "/bin/bash",
@@ -367,7 +365,7 @@ namespace :pg do
     server = cluster.servers.select { |s| s.domain == args.domain }.first
     on "#{cluster.ssh_user}@#{args.domain}" do
       execute("echo", "\"GRANT", "ALL", "PRIVILEGES", "ON", "DATABASE",
-        "\\\"#{database.name}\\\"", "to", "\\\"#{database.role}\\\";\"", "|",
+        "\\\"#{database.name}\\\"", "to", "\\\"#{database.db_role}\\\";\"", "|",
         "docker", "run", "--rm", "--interactive",
         "--entrypoint", "/bin/bash",
         "--volumes-from", server.container_name,
@@ -389,7 +387,11 @@ namespace :pg do
             "--volume", "#{server.data_path}:#{cluster.image.data_path}:rw",
             cluster.image.name, "-s", "/etc/ssl/certs/ssl-cert-snakeoil.pem", inner_server_crt
           )
-          execute("chown", "root.", outer_server_crt)
+          execute("docker", "run",
+            "--rm", "--user", "root", "--entrypoint", "/bin/chown",
+            "--volume", "#{server.data_path}:#{cluster.image.data_path}:rw",
+            cluster.image.name, "root:root", inner_server_crt
+          )
         end
         inner_server_key = "#{cluster.image.data_path}/server.key"
         outer_server_key = "#{server.data_path}/server.key"
@@ -399,7 +401,11 @@ namespace :pg do
             "--volume", "#{server.data_path}:#{cluster.image.data_path}:rw",
             cluster.image.name, "-s", "/etc/ssl/private/ssl-cert-snakeoil.key", inner_server_key
           )
-          execute("chown", "root.", outer_server_key)
+          execute("docker", "run",
+            "--rm", "--user", "root", "--entrypoint", "/bin/chown",
+            "--volume", "#{server.data_path}:#{cluster.image.data_path}:rw",
+            cluster.image.name, "root:root", inner_server_key
+          )
         end
       end
     end
@@ -448,14 +454,14 @@ namespace :pg do
       ERB.new(File.new(template_path).read).result(binding)
     end
 
-    def pg_role_exists?(cluster, server, role)
-      test("echo", "\"SELECT", "*", "FROM", "pg_user", "WHERE", "usename", "=", "'#{role}';\"", "|",
+    def pg_role_exists?(cluster, server, db_role)
+      test("echo", "\"SELECT", "*", "FROM", "pg_user", "WHERE", "usename", "=", "'#{db_role}';\"", "|",
         "docker", "run", "--rm", "--interactive",
         "--entrypoint", "/bin/bash",
         "--volumes-from", server.container_name,
         cluster.image.name,
         "-c", "'/usr/bin/psql", "-U", "postgres'", "|",
-        "grep", "-q", "'#{role}'")
+        "grep", "-q", "'#{db_role}'")
     end
 
     def pg_database_exists?(cluster, server, database)
