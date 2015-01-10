@@ -10,9 +10,7 @@ namespace :postgresinator do
       {
         'examples/Capfile'                                  => 'Capfile_example',
         'examples/config/deploy.rb'                         => 'config/deploy_example.rb',
-        'examples/config/deploy_postgresinator.rb'          => 'config/deploy_postgresinator_example.rb',
         'examples/config/deploy/staging.rb'                 => 'config/deploy/staging_example.rb',
-        'examples/config/deploy/staging_postgresinator.rb'  => 'config/deploy/staging_postgresinator_example.rb',
         'examples/Dockerfile'                               => 'templates/postgresql/Dockerfile_example',
         'examples/postgresql.conf.erb'                      => 'templates/postgresql/postgresql_example.conf.erb',
         'examples/pg_hba.conf.erb'                          => 'templates/postgresql/pg_hba_example.conf.erb',
