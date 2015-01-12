@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name        = 'postgresinator'
-  s.version     = '0.1.0'
+  s.version     = '0.2.0'
   s.date        = '2015-01-09'
   s.summary     = "Deploy PostgreSQL"
   s.description = "An Opinionated PostgreSQL Deployment gem"
@@ -9,7 +9,9 @@ Gem::Specification.new do |s|
   s.files       = [
     "lib/postgresinator.rb",
     "lib/postgresinator/pg.rb",
+    "lib/postgresinator/check.rb",
     "lib/postgresinator/config.rb",
+    "lib/postgresinator/db.rb",
     "lib/postgresinator/examples/Dockerfile",
     "lib/postgresinator/examples/Capfile",
     "lib/postgresinator/examples/config/deploy.rb",

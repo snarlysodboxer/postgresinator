@@ -1,3 +1,3 @@
 standby_mode = 'on'
-primary_conninfo = 'host=<%= @server.master_ip %> port=<%= @server.master_port %> user=replicator password=yourpassword sslmode=require'
-trigger_file = '<%= @cluster.image.data_path %>/postgresql.trigger'
+primary_conninfo = 'host=<%= roles(:db).first.properties.ip %> port=<%= roles(:db).first.properties.postgres_port %> user=replicator password=<%= fetch(:postgres_replicator_pass) %> sslmode=require'
+trigger_file = '<%= fetch(:postgres_data_path) %>/postgresql.trigger'

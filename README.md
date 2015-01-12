@@ -5,9 +5,7 @@ postgresinator
 
 This library is a Capistrano 3.x plugin, and relies on SSH access with passwordless sudo rights, as well as Docker installed on the hosts.
 
-`postgresinator` aims to not clober over anything, however if you use multiple postgresinator.rb configs referencing the same domains, you need to manually verify they are not attempting to setup more than one instance on the same port for a paricular domain (host).
-
-`postgresinator` currently always exposes itself to the specified port on the host, but in future versions aims to support only exposing itself to other containers for those whose services are entirely dockerized.
+`postgresinator` aims to not clober over anything, however if you use multiple <stage>.rb configs referencing the same domains, you need to manually verify they are not attempting to setup more than one instance on the same port for a paricular domain (host).
 
 PostgreSQL only does streaming replication of an entire instance to an entire instance; all databases per instance are streamed to the slave(s).
 
@@ -31,14 +29,16 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 * After setting up your `postgresinator.rb` config file, simply run:
 `cap <stage> pg:setup`
 * Run `cap <stage> pg:setup` again to see it find everything is already setup, and do nothing.
-* Run `cap <stage> pg:statuses` to see the statuses of each instance. (Note: it usually takes a couple of minutes to start seeing the streaming activity.)
-* Run `cap <stage> pg:restore['dump_file','database_name']` to pg_restore a .tar file into the instances.
-* Run `cap <stage> pg:dump['dump_file','database_name']` to pg_dump a .tar file.
-* Run `cap <stage> pg:print_interactive['domain']` to print the command to enter psql interactive mode on one of the instances.
+* Run `cap <stage> pg:status` to see the statuses of each instance.
+* Run `cap <stage> pg:db:list` to list the databases from the master.
+* Run `cap <stage> pg:db:list_roles` to list the database roles from the master.
+* Run `cap <stage> pg:db:streaming` to see the streaming statuses of each instance. (Note: it usually takes a couple of minutes to start seeing the streaming activity.)
+* Run `cap <stage> pg:db:restore['dump_file','database_name']` to pg_restore a .tar file into the instances.
+* Run `cap <stage> pg:db:dump['dump_file','database_name']` to pg_dump a .tar file.
+* Run `cap <stage> pg:db:print_interactive['domain']` to print the command to enter psql interactive mode on one of the instances.
 
 ###### TODOs:
-* Make `pg:statuses` more readable and useful.
-* Make the recovery.conf dependancy more logically defined and adaptable.
+* Make `pg:db:streaming` more readable and useful.
 * More thoroughly test recovery from failure of the master; create task(s) for promoting a new master.
 
 ###### Debugging:

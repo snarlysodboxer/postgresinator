@@ -74,11 +74,9 @@
 local   all         postgres                          ident
 
 # TYPE  DATABASE    USER        CIDR-ADDRESS          METHOD
-<% if @server.master %>
-  <% @cluster.servers.each do |server| %>
-    <% unless server.master %>
+<% if host.has_role?(:db) %>
+  <% roles(:db_slave).each do |server| %>
 hostssl replication replicator  <%= server.ip %>/32    trust
-    <% end %>
   <% end %>
 <% end %>
 host    all         postgres    172.16.0.0/12         trust # allow docker IPs for localhost access on the host
