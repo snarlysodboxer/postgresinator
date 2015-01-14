@@ -1,22 +1,24 @@
 namespace :pg do
   namespace :check do
 
-    desc 'Ensure all postgresinator specific settings are set, and warn and exit if not.'
+    #desc 'Ensure all postgresinator specific settings are set, and warn and exit if not.'
     before 'pg:setup', :settings do
       require 'resolv' unless defined?(Resolv)
-      {
-        (File.dirname(__FILE__) + "/examples/config/deploy.rb") => 'config/deploy.rb',
-        (File.dirname(__FILE__) + "/examples/config/deploy/staging.rb") => "config/deploy/#{fetch(:stage)}.rb"
-      }.each do |abs, rel|
-        Rake::Task['deployinator:settings'].invoke(abs, rel)
-        Rake::Task['deployinator:settings'].reenable
+      run_locally do
+        {
+          (File.dirname(__FILE__) + "/examples/config/deploy.rb") => 'config/deploy.rb',
+          (File.dirname(__FILE__) + "/examples/config/deploy/staging.rb") => "config/deploy/#{fetch(:stage)}.rb"
+        }.each do |abs, rel|
+          Rake::Task['deployinator:settings'].invoke(abs, rel)
+          Rake::Task['deployinator:settings'].reenable
+        end
       end
-      on roles(:db, :db_slave) do |host|
+      on roles(:db, :db_slave, :in => :parallel) do |host|
         unless host.properties.respond_to?(:postgres_port)
           fatal "#{host} does not have postgres_port set." and exit
         end
         unless host.properties.respond_to?(:ip)
-          host.properties.set :ip, Resolv.getaddress(host)
+          host.properties.set :ip, Resolv.getaddress(host.to_s)
         end
       end
       on roles(:db) do |host|
@@ -24,7 +26,7 @@ namespace :pg do
           host.properties.set :postgres_container_name, "#{fetch(:domain)}-postgres-master_#{host.properties.postgres_port}"
         end
       end
-      on roles(:db_slave) do |host|
+      on roles(:db_slave, :in => :parallel) do |host|
         unless host.properties.respond_to?(:postgres_container_name)
           host.properties.set :postgres_container_name, "#{fetch(:domain)}-postgres-slave_#{host.properties.postgres_port}"
         end
@@ -58,32 +60,65 @@ namespace :pg do
 
       task :domain, [:domain] do |t, args|
         run_locally do
-          fatal "Server domain #{args.domain} not found in the configuration" and exit unless roles(:db, :db_slave).include? args.domain
+          unless roles(:db, :db_slave).select { |host| host.to_s == args.domain }.length == 1
+            fatal "Server domain #{args.domain} not found in the configuration" and exit
+          end
+        end
+      end
+
+      task :postgres_uid_gid do
+        on roles(:db) do
+          set :postgres_uid, -> {
+            capture("docker", "run", "--rm", "--tty",
+              "--entrypoint", "/usr/bin/id",
+              fetch(:postgres_image_name), "-u", "postgres").strip
+          }
+          set :postgres_gid, -> {
+            capture("docker", "run", "--rm", "--tty",
+              "--entrypoint", "/usr/bin/id",
+              fetch(:postgres_image_name), "-g", "postgres").strip
+          }
         end
       end
     end
 
-    task :file_permissions => 'deployinator:deployment_user' do
-      on roles(:db, :db_slave) do |host|
+    task :file_permissions => ['pg:ensure_setup', 'deployinator:deployment_user'] do
+      on roles(:db, :db_slave, :in => :parallel) do |host|
         as "root" do
-          execute "mkdir", "-p", fetch(:postgres_data_path), fetch(:postgres_socket_path)
+          execute "mkdir", "-p", fetch(:postgres_data_path),
+            fetch(:postgres_socket_path), fetch(:postgres_config_path)
+          ["#{fetch(:deploy_to)}/..", fetch(:deploy_to), shared_path].each do |dir|
+            execute("chown", "#{fetch(:deployment_user_id)}:#{unix_user_get_gid(fetch(:webserver_username))}", dir.to_s)
+            execute("chmod", "2750", dir.to_s)
+          end
+          # chown everything
           execute("chown", "-R", "#{fetch(:postgres_uid)}:#{fetch(:postgres_gid)}",
-            fetch(:postgres_config_path))
-          execute("chown", "-R", "#{fetch(:postgres_uid)}:#{fetch(:postgres_gid)}",
-            fetch(:postgres_socket_path))
-          execute "find", fetch(:postgres_config_path), "-type", "d",
+            fetch(:postgres_root_path))
+          # chmod data_path
+          execute "find", fetch(:postgres_data_path), "-type", "d",
+            "-exec", "chmod", "2700", "{}", "+"
+          execute "find", fetch(:postgres_data_path), "-type", "f",
+            "-exec", "chmod", "0600", "{}", "+"
+          # chmod everything but data_path
+          execute "find", fetch(:postgres_root_path), "-type", "d",
+            "-not", "-path", "\"#{fetch(:postgres_data_path)}\"",
+            "-not", "-path", "\"#{fetch(:postgres_data_path)}/*\"",
             "-exec", "chmod", "2775", "{}", "+"
-          execute "find", fetch(:postgres_config_path), "-type", "f",
+          execute "find", fetch(:postgres_root_path), "-type", "f",
+            "-not", "-path", "\"#{fetch(:postgres_data_path)}\"",
+            "-not", "-path", "\"#{fetch(:postgres_data_path)}/*\"",
             "-exec", "chmod", "0660", "{}", "+"
         end
       end
     end
+    after 'pg:install_config_files', 'pg:check:file_permissions'
 
-    task :firewalls => 'pg:ensure_setup' do
-      on roles(:db, :db_slave) do |host|
+    task :firewall => ['pg:ensure_setup', 'deployinator:deployment_user'] do
+      on roles(:db, :db_slave, :in => :parallel) do |host|
         as "root" do
           if test "ufw", "status"
-            fatal "Error during opening UFW firewall" and exit unless test("ufw", "allow", "#{host.properties.postgres_port}/tcp")
+            success = test("ufw", "allow", "#{host.properties.postgres_port}/tcp")
+            fatal "Error during opening UFW firewall" and exit unless success
           else
             warn "Uncomplicated Firewall does not appear to be installed, making no firewall action."
           end

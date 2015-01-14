@@ -20,8 +20,10 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 * Turn them into real configs by removing the `_example` portions of their names, and adjusting their content to fit your needs. (Later when you upgrade to a newer version of postgresinator, you can `pg:write_example_configs` again and diff your current configs against the new configs.)
 * You can add any custom PostgreSQL setting you need by adjusting the content of the ERB templates. You won't need to change them to get started.
 * You can later update a template (PostgreSQL config) and run `cap <stage> pg:setup` again to update the config files on each instance and restart them.
+* You may want to for example override entrypoints for use with a custom built docker image, or to tune SQL commands. To view the list of overridable settings which you can copy-paste into your own deploy.rb or <stage>.rb, check the built-in.rb by running:
+`cap <stage> postgresinator:write_built_in`
 
-*NOTE: Rake does not take arguements with spaces between them, they have to be in the exact form:*
+*NOTE: Rake does not take arguments with spaces between them, they have to be in the exact form:*
 `cap <stage> pg:<command>['arg1,'arg2']`
 
 ### Usage:
@@ -31,14 +33,14 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 * Run `cap <stage> pg:setup` again to see it find everything is already setup, and do nothing.
 * Run `cap <stage> pg:status` to see the statuses of each instance.
 * Run `cap <stage> pg:db:list` to list the databases from the master.
-* Run `cap <stage> pg:db:list_roles` to list the database roles from the master.
+* Run `cap <stage> pg:db:list:roles` to list the database roles from the master.
 * Run `cap <stage> pg:db:streaming` to see the streaming statuses of each instance. (Note: it usually takes a couple of minutes to start seeing the streaming activity.)
 * Run `cap <stage> pg:db:restore['dump_file','database_name']` to pg_restore a .tar file into the instances.
 * Run `cap <stage> pg:db:dump['dump_file','database_name']` to pg_dump a .tar file.
-* Run `cap <stage> pg:db:print_interactive['domain']` to print the command to enter psql interactive mode on one of the instances.
+* Run `cap <stage> pg:db:interactive` to enter psql interactive mode on the master.
+* Run `cap <stage> pg:db:interactive:print` to print the command to run on the server to enter psql interactive mode on the master.
 
 ###### TODOs:
-* Make `pg:db:streaming` more readable and useful.
 * More thoroughly test recovery from failure of the master; create task(s) for promoting a new master.
 
 ###### Debugging:
