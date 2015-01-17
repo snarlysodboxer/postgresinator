@@ -82,7 +82,7 @@ namespace :pg do
       end
     end
 
-    task :file_permissions => ['pg:ensure_setup', 'deployinator:deployment_user'] do
+    task :file_permissions => ['pg:ensure_setup', 'postgresinator:deployment_user', 'postgresinator:webserver_user'] do
       on roles(:db, :db_slave, :in => :parallel) do |host|
         as "root" do
           execute "mkdir", "-p", fetch(:postgres_data_path),
@@ -113,7 +113,7 @@ namespace :pg do
     end
     after 'pg:install_config_files', 'pg:check:file_permissions'
 
-    task :firewall => ['pg:ensure_setup', 'deployinator:deployment_user'] do
+    task :firewall => ['pg:ensure_setup', 'postgresinator:deployment_user'] do
       on roles(:db, :db_slave, :in => :parallel) do |host|
         as "root" do
           if test "ufw", "status"

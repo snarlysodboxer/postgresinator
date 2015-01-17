@@ -9,28 +9,27 @@ set :postgres_recovery_conf,            -> { "#{fetch(:postgres_data_path)}/reco
 set :postgres_ssl_key,                  -> { "#{fetch(:postgres_data_path)}/server.key" }
 set :postgres_ssl_csr,                  -> { "#{fetch(:postgres_data_path)}/server.csr" }
 set :postgres_ssl_crt,                  -> { "#{fetch(:postgres_data_path)}/server.crt" }
+set :postgres_log_level,                "info"
 
-def pg_docker_run_command(host)
-  [
-    "--detach",     "--tty", "--user", "postgres",
-    "--name",       host.properties.postgres_container_name,
-    "--volume",     "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
-    "--expose",     "5432",
-    "--publish",    "0.0.0.0:#{host.properties.postgres_port}:5432",
-    "--restart",    "always",
+def pg_run(host)
+  execute("docker", "run", "--detach", "--tty", "--user", "postgres",
+    "--name", host.properties.postgres_container_name,
+    "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
+    "--expose", "5432",
+    "--publish", "0.0.0.0:#{host.properties.postgres_port}:5432",
+    "--restart", "always",
     "--entrypoint", "/usr/lib/postgresql/9.1/bin/postgres",
     fetch(:postgres_image_name),
     "-D", shared_path.join('postgres', 'data'),
-    "-c", "config_file=#{shared_path.join('postgres', 'conf', 'postgresql.conf')}"
-  ]
+    "-c", "config_file=#{shared_path.join('postgres', 'conf', 'postgresql.conf')}")
 end
-def pg_docker_init_command(host)
+def pg_init(host)
   execute("docker", "run", "--rm", "--user", "root",
     "--volume", "#{fetch(:postgres_data_path)}:/postgresql-data:rw",
     "--entrypoint", "/usr/bin/rsync",
     fetch(:postgres_image_name), "-ah", "/var/lib/postgresql/9.1/main/", "/postgresql-data/")
 end
-def pg_docker_replicate_command(host)
+def pg_replicate(host)
   execute("docker", "run", "--rm", "--user", "postgres",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
     "--entrypoint", "/usr/bin/pg_basebackup",
@@ -38,7 +37,7 @@ def pg_docker_replicate_command(host)
     "-w", "-h", fetch(:domain), "-p", fetch(:master_container_port),
     "-U", "replicator", "-D", fetch(:postgres_data_path), "-v", "-x")
 end
-def pg_docker_ssl_csr_command(host)
+def pg_ssl_key(host)
   execute("docker", "run", "--rm", "--user", "root",
     "--entrypoint", "/usr/bin/openssl",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
@@ -47,7 +46,7 @@ def pg_docker_ssl_csr_command(host)
     "-out", fetch(:postgres_ssl_csr),
     "-subj", "\"/C=US/ST=Oregon/L=Portland/O=My Company/OU=Operations/CN=localhost\"")
 end
-def pg_docker_ssl_crt_command(host)
+def pg_ssl_crt(host)
   execute("docker", "run", "--rm", "--user", "root",
     "--entrypoint", "/usr/bin/openssl",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
@@ -56,7 +55,8 @@ def pg_docker_ssl_crt_command(host)
     "-key", fetch(:postgres_ssl_key),
     "-out", fetch(:postgres_ssl_crt))
 end
-def pg_docker_restore_command(host, args, clean)
+def pg_restore(host, args, clean)
+  SSHKit.config.output_verbosity = "debug"
   execute("docker", "run", "--rm",
     "--volume", "/tmp:/tmp:rw",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
@@ -65,8 +65,10 @@ def pg_docker_restore_command(host, args, clean)
     "-c", "'/usr/bin/pg_restore", "-U", "postgres",
     "--host", fetch(:postgres_socket_path), clean,
     "-d", args.database_name, "-F", "tar", "-v", "/tmp/#{args.dump_file}'")
+  SSHKit.config.output_verbosity = fetch(:postgres_log_level)
 end
-def pg_docker_dump_command(host, args)
+def pg_dump(host, args)
+  SSHKit.config.output_verbosity = "debug"
   execute("docker", "run", "--rm",
     "--volume", "/tmp:/tmp:rw",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
@@ -75,8 +77,9 @@ def pg_docker_dump_command(host, args)
     "-c", "'/usr/bin/pg_dump", "-U", "postgres",
     "--host", fetch(:postgres_socket_path), "-F", "tar",
     "-v", args.database_name, ">", "/tmp/#{args.dump_file}'")
+  SSHKit.config.output_verbosity = fetch(:postgres_log_level)
 end
-def pg_docker_interactive_command(host)
+def pg_interactive(host)
   [
     "ssh", "-t", "#{host}", "\"docker", "run", "--rm", "--interactive", "--tty",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
@@ -86,7 +89,7 @@ def pg_docker_interactive_command(host)
     "--host", "#{fetch(:postgres_socket_path)}'\""
   ].join(' ')
 end
-def pg_docker_interactive_print_command(host)
+def pg_interactive_print(host)
   [
     "docker", "run", "--rm", "--interactive", "--tty",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
@@ -96,42 +99,42 @@ def pg_docker_interactive_print_command(host)
     "--host", "#{fetch(:postgres_socket_path)}'"
   ].join(' ')
 end
-def pg_docker_list_databases_command(host)
-  execute "docker", "run", "--rm",
+def pg_list_databases(host)
+  capture("docker", "run", "--rm",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
     "--entrypoint", "/bin/bash",
     fetch(:postgres_image_name),
     "-c", "'/usr/bin/psql", "-U", "postgres",
     "--host", fetch(:postgres_socket_path),
-    "-a", "-c", "\"\\l\"'"
+    "-a", "-c", "\"\\l\"'").lines.each { |l| info l }
 end
-def pg_docker_list_roles_command(host)
-  execute("docker", "run", "--rm",
+def pg_list_roles(host)
+  capture("docker", "run", "--rm",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
     "--entrypoint", "/bin/bash",
     fetch(:postgres_image_name),
     "-c", "'/usr/bin/psql", "-U", "postgres",
     "--host", fetch(:postgres_socket_path),
-    "-c", "\"\\du\"'")
+    "-c", "\"\\du\"'").lines.each { |l| info l }
 end
-def pg_docker_streaming_master_command(host)
-  execute("echo", "\"SELECT", "*", "FROM", "pg_stat_replication;\"", "|",
+def pg_streaming_master(host)
+  capture("echo", "\"SELECT", "*", "FROM", "pg_stat_replication;\"", "|",
     "docker", "run", "--rm", "--interactive",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
     "--entrypoint", "/bin/bash",
     fetch(:postgres_image_name),
     "-c", "'/usr/bin/psql", "-U", "postgres", "-xa",
-    "--host", "#{fetch(:postgres_socket_path)}'")
+    "--host", "#{fetch(:postgres_socket_path)}'").lines.each { |l| info l }
 end
-def pg_docker_streaming_slave_command(host)
-  execute("echo", "\"SELECT", "now()", "-", "pg_last_xact_replay_timestamp()",
+def pg_streaming_slave(host)
+  capture("echo", "\"SELECT", "now()", "-", "pg_last_xact_replay_timestamp()",
     "AS", "replication_delay;\"", "|",
     "docker", "run", "--rm", "--interactive",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
     "--entrypoint", "/bin/bash",
     fetch(:postgres_image_name),
     "-c", "'/usr/bin/psql", "-U", "postgres",
-    "--host", "#{fetch(:postgres_socket_path)}'")
+    "--host", "#{fetch(:postgres_socket_path)}'").lines.each { |l| info l }
 end
 def pg_create_role(db_role, password)
   execute("echo", "\"CREATE", "ROLE", "\\\"#{db_role}\\\"",
@@ -177,13 +180,13 @@ def pg_role_exists?(db_role)
     "grep", "-q", "'#{db_role}'")
 end
 def pg_database_exists?(database_name)
-  test "docker", "run", "--rm",
+  test("docker", "run", "--rm",
     "--volume", "#{fetch(:deploy_to)}:#{fetch(:deploy_to)}:rw",
     "--entrypoint", "/bin/bash",
      fetch(:postgres_image_name),
     "-c", "'/usr/bin/psql", "-U", "postgres",
     "--host", fetch(:postgres_socket_path), "-lqt", "|",
-    "cut", "-d\\|", "-f1", "|", "grep", "-w", "#{database_name}'"
+    "cut", "-d\\|", "-f1", "|", "grep", "-w", "#{database_name}'")
 end
 def pg_database_empty?(database_name)
   test("docker", "run", "--rm", "--tty",

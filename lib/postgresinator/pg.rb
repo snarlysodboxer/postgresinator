@@ -1,71 +1,79 @@
 namespace :pg do
 
   task :ensure_setup => ['pg:check:settings', 'deployinator:sshkit_umask'] do |t, args|
+    SSHKit.config.output_verbosity = fetch(:postgres_log_level)
     Rake::Task['pg:check:settings:database'].invoke(args.database_name) unless args.database_name.nil?
     Rake::Task['pg:check:settings:domain'].invoke(args.domain) unless args.domain.nil?
   end
 
   desc "Idempotently setup one or more PostgreSQL instances and their databases."
-  task :setup => [:ensure_setup, 'deployinator:deployment_user', 'pg:check:firewall', 'pg:check:settings:postgres_uid_gid'] do
+  task :setup => [:ensure_setup, 'postgresinator:deployment_user', 'pg:check:firewall', 'pg:check:settings:postgres_uid_gid'] do
     Rake::Task['pg:install_config_files'].invoke
     on roles(:db) do |host|
-      unless container_exists?(host.properties.postgres_container_name)
+      name = host.properties.postgres_container_name
+      if container_exists?(name)
+        existing_container_start_or_restart_if_needed(host)
+      else
         fatal_message = "#{fetch(:postgres_data_path)} on #{host} is not empty, cannot continue! " +
           "You'll need to delete those files by hand. Be sure you are not deleting important data!"
         as :root do
           fatal fatal_message and exit if files_in_directory?(fetch(:postgres_data_path))
         end
-        pg_docker_init_command(host)
+        pg_init(host)
         install_ssl_key_crt(host)
-        create_container(host.properties.postgres_container_name, pg_docker_run_command(host))
-      else
-        existing_container_start_or_restart(host)
+        warn "Starting a new container named #{name} on #{host}"
+        pg_run(host)
+        check_stayed_running(name)
       end
       set :master_container_running,  false
-      set :master_container_running,  container_is_running?(host.properties.postgres_container_name)
+      set :master_container_running,  container_is_running?(name)
       set :master_container_port,     host.properties.postgres_port
       # sleep to allow postgres to start up before running subsequent commands against it
       sleep 3
       unless pg_role_exists?("replicator")
         info "Creating postgres role 'replicator'."
-        pg_create_role("replicator", fetch(:postres_replicator_pass))
+        pg_create_role("replicator", fetch(:postgres_replicator_pass))
       end
     end
     on roles(:db_slave, :in => :parallel) do |host|
-      unless container_exists?(host.properties.postgres_container_name)
+      name = host.properties.postgres_container_name
+      unless container_exists?(name)
         fatal "Master must be running before creating a slave" and exit unless fetch(:master_container_running)
         fatal_message = "#{fetch(:postgres_data_path)} on #{host} is not empty, cannot continue! " +
           "You'll need to delete those files by hand. Be sure you are not deleting important data!"
         as :root do
           fatal fatal_message and exit if files_in_directory?(fetch(:postgres_data_path))
         end
-        pg_docker_replicate_command(host)
+        pg_replicate(host)
         install_ssl_key_crt(host)
         install_recovery_conf
-        create_container(host.properties.postgres_container_name, pg_docker_run_command(host))
+        warn "Starting a new container named #{name} on #{host}"
+        pg_run(host)
+        check_stayed_running(name)
       else
-        existing_container_start_or_restart(host)
+        existing_container_start_or_restart_if_needed(host)
       end
     end
     Rake::Task['pg:db:setup'].invoke
   end
 
   desc "Check the statuses of each PostgreSQL instance."
-  task :status => [:ensure_setup, 'deployinator:deployment_user'] do
+  task :status => [:ensure_setup, 'postgresinator:deployment_user'] do
     on roles(:db, :db_slave, :in => :sequence) do |host|
-      if container_exists?(host.properties.postgres_container_name)
-        if container_is_running?(host.properties.postgres_container_name)
-          info "#{host.properties.postgres_container_name} exists and is running on #{host}"
+      name = host.properties.postgres_container_name
+      if container_exists?(name)
+        if container_is_running?(name)
+          info "#{name} exists and is running on #{host}"
         else
-          info "#{host.properties.postgres_container_name} exists on #{host} but is not running."
+          info "#{name} exists on #{host} but is not running."
         end
       else
-        info "#{host.properties.postgres_container_name} does not exist on #{host}"
+        info "#{name} does not exist on #{host}"
       end
     end
   end
 
-  task :install_config_files => [:ensure_setup, 'deployinator:deployment_user'] do
+  task :install_config_files => [:ensure_setup, 'postgresinator:deployment_user'] do
     require 'erb' unless defined?(ERB)
     on roles(:db, :db_slave, :in => :parallel) do |host|
       host.properties.set :config_file_changed, false
@@ -77,11 +85,10 @@ namespace :pg do
           upload! StringIO.new(generated_config_file), "/tmp/#{config_file}.file"
           unless test "diff", "-q", "/tmp/#{config_file}.file", "#{fetch(:postgres_config_path)}/#{config_file}"
             warn "Config file #{config_file} on #{host} is being updated."
-            execute("mv", "/tmp/#{config_file}.file", "#{fetch(:postgres_config_path)}/#{config_file}")
+            execute("cp", "/tmp/#{config_file}.file", "#{fetch(:postgres_config_path)}/#{config_file}")
             host.properties.set :config_file_changed, true
-          else
-            execute "rm", "/tmp/#{config_file}.file"
           end
+          execute "rm", "/tmp/#{config_file}.file"
         end
       end
     end
@@ -94,8 +101,8 @@ namespace :pg do
           execute("rm", file)
         end
       end
-      pg_docker_ssl_csr_command(host)
-      pg_docker_ssl_crt_command(host)
+      pg_ssl_key(host)
+      pg_ssl_crt(host)
       execute("rm", fetch(:postgres_ssl_csr))
       execute("chmod", "0600", fetch(:postgres_ssl_key))
       execute("chmod", "0600", fetch(:postgres_ssl_crt))
@@ -118,16 +125,34 @@ namespace :pg do
     end
   end
 
-  def existing_container_start_or_restart(host)
-    if container_is_running?(host.properties.postgres_container_name)
-      if host.properties.config_file_changed or container_is_restarting?(host.properties.postgres_container_name)
-        restart_container(host.properties.postgres_container_name)
+  def existing_container_start_or_restart_if_needed(host)
+    name = host.properties.postgres_container_name
+    if container_is_running?(name)
+      if container_is_restarting?(name)
+        restart_container(name)
+      elsif host.properties.config_file_changed
+        ask_reload_or_restart(name, host)
       else
-        info("No config file changes for #{host.properties.postgres_container_name} " +
+        info("No config file changes for #{name} " +
              "on #{host} and it is already running; we're setup!")
       end
     else
-      start_container(host.properties.postgres_container_name)
+      start_container(name)
+    end
+  end
+
+  def ask_reload_or_restart(name, host)
+    warn "A config file has changed for #{name} on #{host}, please specify " +
+      "whether you would like to have PostgreSQL reload the config, or restart itself"
+    ask :reload_or_restart, nil
+    case fetch(:reload_or_restart).chomp.downcase
+    when "reload"
+      execute("docker", "kill", "-s", "SIGHUP", name)
+    when "restart"
+      restart_container(name)
+    else
+      warn "Please enter 'reload' or 'restart'"
+      ask_reload_or_restart(name, host)
     end
   end
 

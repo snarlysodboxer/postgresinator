@@ -28,7 +28,7 @@ namespace :pg do
         else
           pg_confirm_database_overwrite?(args.database_name) ? clean = "--clean" : exit(0)
         end
-        pg_docker_restore_command(host, args, clean)
+        pg_restore(host, args, clean)
       end
     end
 
@@ -38,14 +38,15 @@ namespace :pg do
         if file_exists?("/tmp/#{args.dump_file}")
           exit unless(pg_confirm_file_overwrite?(args.dump_file))
         end
-        pg_docker_dump_command(host, args)
+        pg_dump(host, args)
       end
     end
 
     desc "Enter psql interactive mode on the master."
     task :interactive => 'pg:ensure_setup' do
       on roles(:db) do |host|
-        system pg_docker_interactive_command(host)
+        info "Entering psql interactive mode inside #{host.properties.postgres_container_name} on #{host}"
+        system pg_interactive(host)
       end
     end
 
@@ -56,7 +57,7 @@ namespace :pg do
           info ["You can paste the following command into a terminal on #{host}",
             "to enter psql interactive mode for",
             "#{host.properties.postgres_container_name}:"].join(' ')
-          info pg_docker_interactive_print_command(host)
+          info pg_interactive_print(host)
         end
       end
     end
@@ -64,7 +65,7 @@ namespace :pg do
     desc "List the databases from the master."
     task :list => ['pg:ensure_setup'] do |t, args|
       on roles(:db) do
-        pg_docker_list_databases_command(host)
+        pg_list_databases(host)
       end
     end
 
@@ -72,7 +73,7 @@ namespace :pg do
       desc "List the roles from the master."
       task :roles => ['pg:ensure_setup'] do |t, args|
         on roles(:db) do
-          pg_docker_list_roles_command(host)
+          pg_list_roles(host)
         end
       end
     end
@@ -80,12 +81,14 @@ namespace :pg do
     desc "Show the streaming replication status of each instance."
     task :streaming => ['pg:ensure_setup'] do
       on roles(:db) do |host|
+        info ""
         info "Streaming status of #{host.properties.postgres_container_name} on #{host}:"
-        pg_docker_streaming_master_command(host)
+        pg_streaming_master(host)
       end
       on roles(:db_slave, :in => :parallel) do
+        info ""
         info "Streaming status of #{host.properties.postgres_container_name} on #{host}:"
-        pg_docker_streaming_slave_command(host)
+        pg_streaming_slave(host)
       end
     end
 
