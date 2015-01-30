@@ -67,7 +67,9 @@ namespace :postgresinator do
       on roles(:all) do |h|
         on "#{fetch(:preexisting_ssh_user)}@#{h}" do |host|
           as :root do
-            deployment_user_setup(fetch(:postgres_templates_path))
+            path = fetch(:deploy_templates_path, nil)
+            path = fetch(:postgres_templates_path) if path.nil?
+            deployment_user_setup(path)
           end
         end
       end

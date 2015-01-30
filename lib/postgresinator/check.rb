@@ -88,7 +88,7 @@ namespace :pg do
           execute "mkdir", "-p", fetch(:postgres_data_path),
             fetch(:postgres_socket_path), fetch(:postgres_config_path)
           ["#{fetch(:deploy_to)}/..", fetch(:deploy_to), shared_path].each do |dir|
-            execute("chown", "#{fetch(:deployment_user_id)}:#{unix_user_get_gid(fetch(:webserver_username))}", dir.to_s)
+            execute("chown", "#{fetch(:deployment_username)}:#{unix_user_get_gid(fetch(:webserver_username))}", dir.to_s)
             execute("chmod", "2750", dir.to_s)
           end
           # chown everything
