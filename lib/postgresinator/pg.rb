@@ -1,7 +1,6 @@
 namespace :pg do
 
   task :ensure_setup => ['pg:check:settings', 'deployinator:sshkit_umask'] do |t, args|
-    SSHKit.config.output_verbosity = fetch(:postgres_log_level)
     Rake::Task['pg:check:settings:database'].invoke(args.database_name) unless args.database_name.nil?
     Rake::Task['pg:check:settings:domain'].invoke(args.domain) unless args.domain.nil?
   end
@@ -74,7 +73,7 @@ namespace :pg do
   end
 
   task :install_config_files => [:ensure_setup, 'postgresinator:deployment_user'] do
-    require 'erb' unless defined?(ERB)
+    require 'erb'
     on roles(:db, :db_slave, :in => :parallel) do |host|
       host.properties.set :config_file_changed, false
       as 'root' do
@@ -144,7 +143,10 @@ namespace :pg do
   def ask_reload_or_restart(name, host)
     warn "A config file has changed for #{name} on #{host}, please specify " +
       "whether you would like to have PostgreSQL reload the config, or restart itself"
-    ask :reload_or_restart, nil
+    set :reload_or_restart, ""
+    while fetch(:reload_or_restart).empty?
+      ask :reload_or_restart, ""
+    end
     case fetch(:reload_or_restart).chomp.downcase
     when "reload"
       execute("docker", "kill", "-s", "SIGHUP", name)

@@ -72,6 +72,9 @@
 #
 # Database administrative login by UNIX sockets
 local   all         postgres                          trust
+<% fetch(:postgres_databases).each do |db| %>
+local   all         <%= db[:db_role] %>                          trust
+<% end %>
 
 # TYPE  DATABASE    USER        CIDR-ADDRESS          METHOD
 <% if host.has_role?(:db) %>

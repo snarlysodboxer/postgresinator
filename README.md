@@ -16,7 +16,7 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 * Create a Capfile which requires postgresinator:
 `echo "require 'postgresinator'" > Capfile`
 * Create example configs:
-`cap staging postgresinator:write_example_configs`
+`cap postgresinator:write_example_configs`
 * Turn them into real configs by removing the `_example` portions of their names, and adjusting their content to fit your needs. (Later when you upgrade to a newer version of postgresinator, you can `pg:write_example_configs` again and diff your current configs against the new configs.)
 * You can add any custom PostgreSQL setting you need by adjusting the content of the ERB templates. You won't need to change them to get started.
 * You can later update a template (PostgreSQL config) and run `cap <stage> pg:setup` again to update the config files on each instance and restart them.
@@ -28,7 +28,7 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 
 ### Usage:
 `rake -T` will help remind you of the available commands, see this for more details.
-* After setting up your `postgresinator.rb` config file, simply run:
+* After setting up your config files, simply run:
 `cap <stage> pg:setup`
 * Run `cap <stage> pg:setup` again to see it find everything is already setup, and do nothing.
 * Run `cap <stage> pg:status` to see the statuses of each instance.
@@ -41,8 +41,14 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 * Run `cap <stage> pg:db:interactive:print` to print the command to run on the server to enter psql interactive mode on the master.
 
 ###### TODOs:
+* Switch to universal container paths instead of version specific ones like `/var/lib/postgresql/9.1/main/` etc.
 * More thoroughly test recovery from failure of the master; create task(s) for promoting a new master.
 * Fix the problem of having to define a stage before being able to run postgresinator commands.
+* Add ability to re-create the master container
+* Add task to re-setup broken streaming
+* Re-design streaming rep security to avoid MITM attacks
+* Add task for entering console on slave
+* Add tasks for restarting/reloading postgres
 
 ###### Debugging:
 * You can add the `--trace` option at the end of any rake task to see when which task is invoked, and when which task is actually executed.

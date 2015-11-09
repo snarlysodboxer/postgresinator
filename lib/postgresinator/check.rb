@@ -3,7 +3,7 @@ namespace :pg do
 
     #desc 'Ensure all postgresinator specific settings are set, and warn and exit if not.'
     before 'pg:setup', :settings do
-      require 'resolv' unless defined?(Resolv)
+      require 'resolv'
       run_locally do
         {
           (File.dirname(__FILE__) + "/examples/config/deploy.rb") => 'config/deploy.rb',
