@@ -66,7 +66,6 @@ def pg_ssl_crt(host)
   )
 end
 def pg_restore(host, args, clean)
-  level = SSHKit.config.output_verbosity = "debug"
   execute(
     "docker", "run", "--rm",
     "--volume", "/tmp:/tmp:rw",
@@ -77,10 +76,8 @@ def pg_restore(host, args, clean)
     "--host", fetch(:postgres_socket_path), clean,
     "-d", args.database_name, "-F", "tar", "-v", "/tmp/#{args.dump_file}'"
   )
-  SSHKit.config.output_verbosity = level
 end
 def pg_dump(host, args)
-  level = SSHKit.config.output_verbosity = "debug"
   execute(
     "docker", "run", "--rm",
     "--volume", "/tmp:/tmp:rw",
@@ -91,7 +88,6 @@ def pg_dump(host, args)
     "--host", fetch(:postgres_socket_path), "-F", "tar",
     "-v", args.database_name, ">", "/tmp/#{args.dump_file}'"
   )
-  SSHKit.config.output_verbosity = level
 end
 def pg_interactive(host)
   [

@@ -28,7 +28,11 @@ namespace :pg do
         else
           pg_confirm_database_overwrite?(args.database_name) ? clean = "--clean" : exit(0)
         end
+        level = SSHKit.config.output_verbosity
+        level ||= :info
+        SSHKit.config.output_verbosity = :debug
         pg_restore(host, args, clean)
+        SSHKit.config.output_verbosity = level
       end
     end
 
@@ -38,7 +42,11 @@ namespace :pg do
         if file_exists?("/tmp/#{args.dump_file}")
           exit unless(pg_confirm_file_overwrite?(args.dump_file))
         end
+        level = SSHKit.config.output_verbosity
+        level ||= :info
+        SSHKit.config.output_verbosity = :debug
         pg_dump(host, args)
+        SSHKit.config.output_verbosity = level
       end
     end
 
