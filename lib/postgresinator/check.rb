@@ -54,7 +54,7 @@ namespace :pg do
             next unless database[:name] == args.database_name
             database_found = true
           end
-          fatal "Database #{args.domain} not found in the configuration" and exit unless database_found
+          fatal "Database #{args.database_name} not found in the configuration" and exit unless database_found
         end
       end
 
