@@ -49,6 +49,8 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 * Re-design streaming rep security to avoid MITM attacks
 * Add task for entering console on slave
 * Add tasks for restarting/reloading postgres
+* Add a 'non-interactive=true' switch to all interactive questions
+* Use a lock file to auto-detect when docker run commands have changed, - and recreate containers instead of restarting them.
 
 ###### Debugging:
 * You can add the `--trace` option at the end of any rake task to see when which task is invoked, and when which task is actually executed.

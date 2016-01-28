@@ -1,7 +1,7 @@
 set :postgres_templates_path,           "templates/postgres"
 set :postgres_config_files,             ["postgresql.conf", "pg_hba.conf"]
 set :postgres_recovery_conf,            ["recovery.conf"]
-set :postgres_root_path,                -> { shared_path.join('postgres') }
+set :postgres_root_path,                -> { shared_path.join('postgres', fetch(:stage).to_s) }
 set :postgres_data_path,                -> { fetch(:postgres_root_path).join('data') }
 set :postgres_config_path,              -> { fetch(:postgres_root_path).join('conf') }
 set :postgres_socket_path,              -> { fetch(:postgres_root_path).join('run') }
@@ -21,8 +21,8 @@ def pg_run(host)
     # TODO switch to universal entrypoints instead of version specific ones
     "--entrypoint", "/usr/lib/postgresql/9.1/bin/postgres",
     fetch(:postgres_image_name),
-    "-D", shared_path.join('postgres', 'data'),
-    "-c", "config_file=#{shared_path.join('postgres', 'conf', 'postgresql.conf')}"
+    "-D", fetch(:postgres_data_path),
+    "-c", "config_file=#{fetch(:postgres_config_path)}/postgresql.conf"
   )
 end
 def pg_init(host)

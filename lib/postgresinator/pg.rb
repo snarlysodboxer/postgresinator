@@ -35,6 +35,7 @@ namespace :pg do
       end
     end
     on roles(:db_slave, :in => :parallel) do |host|
+      # TODO check for current streaming, remove container and remove data dir if not current
       name = host.properties.postgres_container_name
       unless container_exists?(name)
         fatal "Master must be running before creating a slave" and exit unless fetch(:master_container_running)
