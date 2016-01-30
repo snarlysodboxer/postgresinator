@@ -1,6 +1,6 @@
 namespace :pg do
 
-  task :ensure_setup => ['pg:check:settings', 'deployinator:sshkit_umask'] do |t, args|
+  task :ensure_setup => ['deployinator:load_settings', 'pg:check:settings', 'deployinator:sshkit_umask'] do |t, args|
     Rake::Task['pg:check:settings:database'].invoke(args.database_name) unless args.database_name.nil?
     Rake::Task['pg:check:settings:domain'].invoke(args.domain) unless args.domain.nil?
   end

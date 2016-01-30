@@ -2,7 +2,7 @@ namespace :pg do
   namespace :check do
 
     #desc 'Ensure all postgresinator specific settings are set, and warn and exit if not.'
-    before 'pg:setup', :settings do
+    before 'pg:setup', :settings => 'deployinator:load_settings' do
       require 'resolv'
       run_locally do
         {
@@ -42,7 +42,7 @@ namespace :pg do
 
     namespace :settings do
       desc 'Print example postgresinator specific settings for comparison.'
-      task :print do
+      task :print => 'deployinator:load_settings' do
         set :print_all, true
         Rake::Task['pg:check:settings'].invoke
       end
@@ -66,7 +66,7 @@ namespace :pg do
         end
       end
 
-      task :postgres_uid_gid do
+      task :postgres_uid_gid => 'deployinator:load_settings' do
         on roles(:db) do
           set :postgres_uid, -> {
             capture("docker", "run", "--rm", "--tty",
