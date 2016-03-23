@@ -2,7 +2,7 @@ namespace :pg do
   namespace :check do
 
     #desc 'Ensure all postgresinator specific settings are set, and warn and exit if not.'
-    before 'pg:setup', :settings => 'deployinator:load_settings' do
+    task :settings => 'deployinator:load_settings' do
       require 'resolv'
       run_locally do
         {
@@ -39,6 +39,7 @@ namespace :pg do
         end
       end
     end
+    before 'pg:setup', 'pg:check:settings'
 
     namespace :settings do
       desc 'Print example postgresinator specific settings for comparison.'

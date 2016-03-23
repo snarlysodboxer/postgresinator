@@ -59,6 +59,27 @@ namespace :pg do
     end
 
     namespace :interactive do
+      desc "Enter psql interactive mode on a slave."
+      task :slave => 'pg:ensure_setup' do
+        run_locally do
+          warn "There are no slave instances setup for #{fetch(:stage)}" if roles(:db_slave).length < 1
+          if roles(:db_slave).length > 1
+            info "There's more than one slave:"
+            roles(:db_slave).each_with_index do |slave, index|
+              info "#{index}. #{slave}"
+            end
+            ask :number, roles(:db_slave).each_with_index.map { |_, i| i }.join(", ")
+            set :filter, :hosts => [roles(:db_slave)[fetch(:number).to_i].to_s]
+          end
+        end
+        on roles(:db_slave) do |host|
+          info "Entering psql interactive mode inside #{host.properties.postgres_container_name} on #{host}"
+          system pg_interactive(host)
+        end
+      end
+    end
+
+    namespace :interactive do
       desc "Print the command to enter psql interactive mode on the master."
       task :print => 'pg:ensure_setup' do
         on roles(:db) do |host|

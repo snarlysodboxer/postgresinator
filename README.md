@@ -9,8 +9,6 @@ This library is a Capistrano 3.x plugin, and relies on SSH access with passwordl
 
 PostgreSQL only does streaming replication of an entire instance to an entire instance; all databases per instance are streamed to the slave(s).
 
-Currently only tested against PostgreSQL 9.1, but should work just as well for newer versions.
-
 ### Installation:
 * `gem install postgresinator` (Or add it to your Gemfile and `bundle install`.)
 * Create a Capfile which requires postgresinator:
@@ -38,17 +36,15 @@ Currently only tested against PostgreSQL 9.1, but should work just as well for n
 * Run `cap <stage> pg:db:restore['dump_file','database_name']` to pg_restore a .tar file into the instances.
 * Run `cap <stage> pg:db:dump['dump_file','database_name']` to pg_dump a .tar file.
 * Run `cap <stage> pg:db:interactive` to enter psql interactive mode on the master.
+* Run `cap <stage> pg:db:interactive:slave` to enter psql interactive mode on the slave.
 * Run `cap <stage> pg:db:interactive:print` to print the command to run on the server to enter psql interactive mode on the master.
 
 ###### TODOs:
-* Switch to universal container paths instead of version specific ones like `/var/lib/postgresql/9.1/main/` etc.
 * More thoroughly test recovery from failure of the master; create task(s) for promoting a new master.
-* Fix the problem of having to define a stage before being able to run postgresinator commands.
 * Add ability to re-create the master container
 * Add task to re-setup broken streaming
-* Re-design streaming rep security to avoid MITM attacks
-* Add task for entering console on slave
 * Add tasks for restarting/reloading postgres
+* Improve pg:db:streaming output and usefulness
 * Add a 'non-interactive=true' switch to all interactive questions
 * Use a lock file to auto-detect when docker run commands have changed, - and recreate containers instead of restarting them.
 

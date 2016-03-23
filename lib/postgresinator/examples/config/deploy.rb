@@ -7,4 +7,5 @@ set :application,                   "my_app_name"
 set :preexisting_ssh_user,          ENV['USER']
 set :deployment_username,           "deployer"
 set :webserver_username,            "www-data" # needed for intergration w/ deployinator
+set :postgres_version,              "9.1"
 ### ------------------------------------------------------------------

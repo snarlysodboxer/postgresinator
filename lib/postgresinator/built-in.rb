@@ -9,6 +9,8 @@ set :postgres_recovery_conf,            -> { "#{fetch(:postgres_data_path)}/reco
 set :postgres_ssl_key,                  -> { "#{fetch(:postgres_data_path)}/server.key" }
 set :postgres_ssl_csr,                  -> { "#{fetch(:postgres_data_path)}/server.csr" }
 set :postgres_ssl_crt,                  -> { "#{fetch(:postgres_data_path)}/server.crt" }
+set :postgres_entrypoint,               -> { "/usr/lib/postgresql/#{fetch(:postgres_version)}/bin/postgres" }
+set :postgres_main_dir,                 -> { "/var/lib/postgresql/#{fetch(:postgres_version)}/main/" }
 
 def pg_run(host)
   execute(
@@ -19,7 +21,7 @@ def pg_run(host)
     "--publish", "0.0.0.0:#{host.properties.postgres_port}:5432",
     "--restart", "always",
     # TODO switch to universal entrypoints instead of version specific ones
-    "--entrypoint", "/usr/lib/postgresql/9.1/bin/postgres",
+    "--entrypoint", fetch(:postgres_entrypoint),
     fetch(:postgres_image_name),
     "-D", fetch(:postgres_data_path),
     "-c", "config_file=#{fetch(:postgres_config_path)}/postgresql.conf"
@@ -30,7 +32,7 @@ def pg_init(host)
     "docker", "run", "--rm", "--user", "root",
     "--volume", "#{fetch(:postgres_data_path)}:/postgresql-data:rw",
     "--entrypoint", "/usr/bin/rsync",
-    fetch(:postgres_image_name), "-ah", "/var/lib/postgresql/9.1/main/", "/postgresql-data/"
+    fetch(:postgres_image_name), "-ah", fetch(:postgres_main_dir), "/postgresql-data/"
   )
 end
 def pg_replicate(host)

@@ -1,7 +1,7 @@
 Gem::Specification.new do |s|
   s.name        = 'postgresinator'
-  s.version     = '0.2.1'
-  s.date        = '2015-01-30'
+  s.version     = '0.3.0'
+  s.date        = '2016-03-22'
   s.summary     = "Deploy PostgreSQL"
   s.description = "Deploy PostgreSQL instances using Capistrano and Docker"
   s.authors     = ["david amick"]
@@ -24,7 +24,7 @@ Gem::Specification.new do |s|
   s.required_ruby_version   =               '>= 1.9.3'
   s.requirements            <<              "Docker ~> 1.3.1"
   s.add_runtime_dependency  'capistrano',   '~> 3.2.1'
-  s.add_runtime_dependency  'deployinator', '~> 0.2.0'
+  s.add_runtime_dependency  'deployinator', '~> 0.1.6'
   s.add_runtime_dependency  'rake',         '~> 10.3.2'
   s.add_runtime_dependency  'sshkit',       '~> 1.5.1'
   s.homepage                =
