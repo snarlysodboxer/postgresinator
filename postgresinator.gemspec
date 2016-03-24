@@ -1,7 +1,7 @@
 Gem::Specification.new do |s|
   s.name        = 'postgresinator'
-  s.version     = '0.3.0'
-  s.date        = '2016-03-22'
+  s.version     = '0.3.1'
+  s.date        = '2016-03-23'
   s.summary     = "Deploy PostgreSQL"
   s.description = "Deploy PostgreSQL instances using Capistrano and Docker"
   s.authors     = ["david amick"]

@@ -204,7 +204,7 @@ def pg_role_exists?(db_role)
     fetch(:postgres_image_name),
     "-c", "'/usr/bin/psql", "-U", "postgres",
     "--host", "#{fetch(:postgres_socket_path)}'", "|",
-    "grep", "-q", "'#{db_role}'"
+    "grep", "-qw", "'#{db_role}'"
   )
 end
 def pg_database_exists?(database_name)
@@ -215,7 +215,7 @@ def pg_database_exists?(database_name)
      fetch(:postgres_image_name),
     "-c", "'/usr/bin/psql", "-U", "postgres",
     "--host", fetch(:postgres_socket_path), "-lqt", "|",
-    "cut", "-d\\|", "-f1", "|", "grep", "-w", "#{database_name}'"
+    "cut", "-d\\|", "-f1", "|", "grep", "-qw", "#{database_name}'"
   )
 end
 def pg_database_empty?(database_name)
